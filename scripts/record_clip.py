@@ -35,14 +35,17 @@ def main() -> None:
     seed = sys.argv[3] if len(sys.argv) > 3 else "11"
     if "seed=" not in url:
         url += ("&" if "?" in url else "?") + f"seed={seed}"
+    if "hd=" not in url:
+        url += "&hd=2"  # 2x canvas so the 1080x1920 frame is crisp
     CLIPS.mkdir(exist_ok=True)
     lead_in = 1.6  # seconds of page load + "UNTANGLE!" splash to trim away
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
+        # the video frame must equal the viewport, or Playwright pads the page into a grey corner
         ctx = browser.new_context(
-            viewport={"width": 540, "height": 960},
-            device_scale_factor=2,
+            viewport={"width": 1080, "height": 1920},
+            device_scale_factor=1,
             is_mobile=True,
             has_touch=True,
             record_video_dir=str(CLIPS),

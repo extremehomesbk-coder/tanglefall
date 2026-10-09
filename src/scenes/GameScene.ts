@@ -9,6 +9,7 @@ import { FrameView } from '../view/FrameView';
 import { Hud } from '../view/Hud';
 import { KnotView } from '../view/KnotView';
 import { Layout } from '../view/layout';
+import { HD } from '../hd';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
 const AUTO_EVERY_MS = 420;
@@ -63,6 +64,7 @@ export class GameScene extends Phaser.Scene {
     this.model.drain();
     this.layout = new Layout();
     this.layout.setRopeCount(this.model.ropes.length);
+    this.cameras.main.setZoom(HD).centerOn(CONFIG.layout.width / 2, CONFIG.layout.height / 2);
 
     this.drawBoard();
     this.braid = new BraidView(this, this.layout, this.snapshot()).setDepth(10);
@@ -287,7 +289,7 @@ export class GameScene extends Phaser.Scene {
   // ---------- input ----------
 
   private bindInput(): void {
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onTap(p.x, p.y));
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onTap(p.worldX, p.worldY));
     const kb = this.input.keyboard;
     if (!kb) return;
     kb.on('keydown-LEFT', () => this.run(() => this.model.moveFrame(this.model.frameGap - 1)));

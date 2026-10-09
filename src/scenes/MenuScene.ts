@@ -3,6 +3,7 @@ import { CONFIG } from '../config';
 import { getHighScore, getMute, getTwoTap, setMute, setTwoTap } from '../storage';
 import { setMuted, unlockAudio } from '../audio';
 import { drawSlantFrame } from '../view/FrameView';
+import { HD } from '../hd';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
 
@@ -19,6 +20,7 @@ export class MenuScene extends Phaser.Scene {
 
   create(): void {
     const { width, height } = CONFIG.layout;
+    this.cameras.main.setZoom(HD).centerOn(width / 2, height / 2);
     this.twoTap = getTwoTap(CONFIG.rules.twoTapMode);
     setMuted(getMute());
     // ?auto=1 (demo / clip recording) skips the menu
@@ -117,13 +119,13 @@ export class MenuScene extends Phaser.Scene {
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       unlockAudio();
-      if (this.toggleRect.contains(p.x, p.y)) {
+      if (this.toggleRect.contains(p.worldX, p.worldY)) {
         this.twoTap = !this.twoTap;
         setTwoTap(this.twoTap);
         this.refreshToggle();
         return;
       }
-      if (this.soundRect.contains(p.x, p.y)) {
+      if (this.soundRect.contains(p.worldX, p.worldY)) {
         const mute = !getMute();
         setMute(mute);
         setMuted(mute);
