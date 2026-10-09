@@ -1,0 +1,19 @@
+import Phaser from 'phaser';
+import { CONFIG } from './config';
+import { GameScene } from './scenes/GameScene';
+import { MenuScene } from './scenes/MenuScene';
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'app',
+  backgroundColor: CONFIG.colors.background,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: CONFIG.layout.width,
+    height: CONFIG.layout.height,
+  },
+  render: { antialias: true, roundPixels: false },
+  input: { activePointers: 2 },
+  scene: [MenuScene, GameScene],
+});
