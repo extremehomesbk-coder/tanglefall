@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { playBonus, playGameOver, playPush, playRopeClear, playTwist, playUntwist, unlockAudio } from '../audio';
 import { CONFIG } from '../config';
+import { applyMove, chooseMove, type BotStyle } from '../model/bot';
 import { computePerms, Game } from '../model/game';
 import type { GameEvent, Knot, Rope } from '../model/types';
 import { getHighScore, setHighScore } from '../storage';
@@ -12,8 +13,9 @@ import { Layout } from '../view/layout';
 import { HD } from '../hd';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-const AUTO_EVERY_MS = 420;
 type OverlayKind = 'stageClear' | 'walkOver' | 'gameOver';
+/** ?demo=: 'fail' plays until it is CONFIG.demo.failStopShort dogs from the target (or failPlayMs), then idles out the clock. */
+type DemoStyle = BotStyle | 'fail';
 
 export interface GameSceneData {
   twoTap?: boolean;
@@ -23,7 +25,7 @@ export class GameScene extends Phaser.Scene {
   private model!: Game;
   private layout!: Layout;
   private braid!: BraidView;
-  private dogViews = new Map<number, Phaser.GameObjects.Text>();
+  private dogViews = new Map<number, Phaser.GameObjects.Image>();
   private knotViews = new Map<number, KnotView>();
   private frame!: FrameView;
   private hud!: Hud;
@@ -39,6 +41,9 @@ export class GameScene extends Phaser.Scene {
   private ropesBefore: Rope[] = [];
   private pendingTransition: Phaser.Time.TimerEvent | null = null;
   private auto = false;
+  private demoStyle: DemoStyle = 'play';
+  private hookText: string | null = null;
+  private walkStartMs = 0;
   private autoTimer = 0;
   private fpsTimer = 0;
 
@@ -48,6 +53,14 @@ export class GameScene extends Phaser.Scene {
 
   init(data: GameSceneData): void {
     this.twoTap = data.twoTap ?? CONFIG.rules.twoTapMode;
+  }
+
+  preload(): void {
+    // original flat dog sprites (public/dogs, drawn by scripts/make_dogs.py); 2x texture so phones stay crisp
+    for (const b of CONFIG.breeds) {
+      const key = `dog-${b.sprite}`;
+      if (!this.textures.exists(key)) this.load.svg(key, `dogs/${b.sprite}.svg`, { scale: 2 * HD });
+    }
   }
 
   create(): void {
@@ -60,8 +73,14 @@ export class GameScene extends Phaser.Scene {
     const q = new URLSearchParams(window.location.search);
     const seed = Number(q.get('seed'));
     this.auto = q.has('auto');
+    this.demoStyle = this.auto ? ((q.get('demo') as DemoStyle | null) ?? 'play') : 'play';
+    this.hookText = this.auto ? q.get('hook') : null;
     this.model = new Game(CONFIG, Number.isFinite(seed) && seed > 0 ? seed : undefined);
-    this.model.startStage(1, 1);
+    const walk = (q.get('walk') ?? '1-1').split('-').map(Number);
+    this.model.startStage(this.auto && walk[0] > 0 ? walk[0] : 1, this.auto && walk[1] > 0 ? walk[1] : 1);
+    const walkSec = Number(q.get('walksec'));
+    if (this.auto && walkSec > 0) this.model.walkMsLeft = walkSec * 1000;
+    this.walkStartMs = this.model.walkMsLeft;
     this.model.drain();
     this.layout = new Layout();
     this.layout.setRopeCount(this.model.ropes.length);
@@ -80,6 +99,11 @@ export class GameScene extends Phaser.Scene {
 
   private getReady(): void {
     const L = this.layout;
+    if (this.hookText) {
+      this.showHook(this.hookText);
+      this.hookText = null;
+      return;
+    }
     if (CONFIG.rules.walkMode) {
       const sub = this.add
         .text(L.width / 2, L.boardTop + L.boardHeight * 0.4 + 34, `get ${this.model.walkTarget} dogs home`, {
@@ -107,6 +131,37 @@ export class GameScene extends Phaser.Scene {
       .setScale(0.5);
     this.tweens.add({ targets: t, scale: 1.1, duration: 250, ease: 'Back.easeOut' });
     this.tweens.add({ targets: t, alpha: 0, y: t.y - 30, delay: 650, duration: 300, onComplete: () => t.destroy() });
+  }
+
+  /** Clip hook (?hook=line|line2): big centred text over the board while the bot waits, then the walk starts. */
+  private showHook(text: string): void {
+    const L = this.layout;
+    const lines = text.split('|');
+    const cx = L.width / 2;
+    const cy = L.boardTop + L.boardHeight * 0.36;
+    const made: Phaser.GameObjects.GameObject[] = [];
+    const bg = this.add.rectangle(cx, cy, L.width - 32, 60 + lines.length * 44, 0x000000, 0.62).setDepth(89);
+    made.push(bg);
+    lines.forEach((line, i) => {
+      const t = this.add
+        .text(cx, cy - ((lines.length - 1) * 44) / 2 + i * 44, line.trim(), {
+          fontFamily: FONT,
+          fontSize: i === 0 ? '34px' : '26px',
+          color: i === 0 ? CONFIG.colors.text : '#ffd166',
+          fontStyle: 'bold',
+          stroke: '#000',
+          strokeThickness: 6,
+          align: 'center',
+          wordWrap: { width: L.width - 48 },
+        })
+        .setOrigin(0.5)
+        .setDepth(90)
+        .setScale(0.6);
+      this.tweens.add({ targets: t, scale: 1, duration: 260, delay: i * 120, ease: 'Back.easeOut' });
+      made.push(t);
+    });
+    this.autoTimer = -CONFIG.demo.hookMs; // the bot waits while the hook is up
+    this.tweens.add({ targets: made, alpha: 0, delay: CONFIG.demo.hookMs, duration: 250, onComplete: () => made.forEach((o) => o.destroy()) });
   }
 
   // ---------- static board ----------
@@ -220,10 +275,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private makeDog(rope: Rope): void {
+    const breed = this.model.breedOf(rope);
     const dog = this.add
-      .text(0, this.layout.boardBottom + 20, this.model.breedOf(rope).emoji, { fontSize: '24px' })
-      .setOrigin(0.5)
+      .image(0, this.layout.boardBottom + 2, `dog-${breed.sprite}`)
+      .setOrigin(CONFIG.layout.dogCollar.x, CONFIG.layout.dogCollar.y)
       .setDepth(11);
+    const s = Math.min(CONFIG.layout.dogWidth, this.layout.spacing * 0.95) / dog.width;
+    dog.setScale(s).setData('s', s);
+    // idle: a little bob, out of phase per dog
+    this.tweens.add({ targets: dog, y: dog.y + 2.5, duration: 520 + Math.random() * 260, delay: Math.random() * 400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     this.dogViews.set(rope.id, dog);
   }
 
@@ -389,6 +449,8 @@ export class GameScene extends Phaser.Scene {
         if (v) this.animateUntwist(v, e.knot, e.points, e.chain);
         this.knotViews.delete(e.knot.id);
         playUntwist(e.chain);
+        const callout = CONFIG.anim.chainCallouts[e.chain];
+        if (callout) this.floatText(this.layout.centerX, this.layout.boardTop + this.layout.boardHeight * 0.3, callout, '#ffd166', 30);
         break;
       }
       case 'chain':
@@ -418,8 +480,9 @@ export class GameScene extends Phaser.Scene {
           this.dogViews.delete(e.rope.id);
           this.tweens.killTweensOf(dog);
           const dir = dog.x < this.layout.centerX ? -1 : 1;
-          dog.setFlipX(dir > 0);
-          this.tweens.add({ targets: dog, scale: 1.5, duration: 160, yoyo: true });
+          const s = (dog.getData('s') as number) ?? 1;
+          dog.setFlipX(dir < 0); // the sprite faces right
+          this.tweens.add({ targets: dog, scale: s * 1.4, duration: 160, yoyo: true });
           this.tweens.add({
             targets: dog,
             x: dog.x + dir * 260,
@@ -510,7 +573,8 @@ export class GameScene extends Phaser.Scene {
     this.burst(v.x, v.y, 8, 0xffffff);
     for (const id of [knot.left, knot.right]) {
       const dog = this.dogViews.get(id);
-      if (dog) this.tweens.add({ targets: dog, scale: { from: 1.35, to: 1 }, duration: 220, ease: 'Back.easeOut' });
+      const s = (dog?.getData('s') as number) ?? 1;
+      if (dog) this.tweens.add({ targets: dog, scale: { from: s * 1.3, to: s }, duration: 220, ease: 'Back.easeOut' });
     }
     this.floatText(v.x, v.y - 16, chain > 1 ? `+${points}  x${chain}` : `+${points}`, '#9dffb0', 14 + Math.min(chain, 8) * 2);
   }
@@ -663,55 +727,20 @@ export class GameScene extends Phaser.Scene {
   private autoStep(): void {
     const m = this.model;
     if (this.overlay) {
+      if (this.demoStyle === 'fail') return; // leave TIME'S UP on screen for the clip
       this.dismissOverlay();
       return;
     }
     if (m.status !== 'playing') return;
-    if (m.candle && m.candleAligned()) {
-      this.run(() => this.model.candleConnect());
-      return;
-    }
-    const perms = m.perms();
-    let best = -1;
-    let bestScore = -1;
-    for (let g = 0; g < m.gapCount; g++) {
-      const k = m.bottomKnot(g);
-      if (!k || !m.wouldUntwist(k, m.frameType, perms)) continue;
-      const score = m.knotsInGap(g).length + (m.isDanger(k) ? 10 : 0) + (k.power !== 'none' ? 2 : 0);
-      if (score > bestScore) {
-        bestScore = score;
-        best = g;
-      }
-    }
-    if (best >= 0) {
-      const g = best;
-      this.run(() => {
-        this.model.moveFrame(g);
-        this.model.act();
-      });
-      return;
-    }
-    if (m.bonuses > 0) {
-      this.run(() => this.model.flipWithBonus());
-      return;
-    }
-    // stuck: tighten the gap whose bottom knot is highest (least dangerous)
-    let g2 = -1;
-    let topRow = Number.MAX_SAFE_INTEGER;
-    for (let g = 0; g < m.gapCount; g++) {
-      const k = m.bottomKnot(g);
-      if (k && k.row < topRow) {
-        topRow = k.row;
-        g2 = g;
-      }
-    }
-    if (g2 >= 0) {
-      const g = g2;
-      this.run(() => {
-        this.model.moveFrame(g);
-        this.model.act();
-      });
-    }
+    const style: BotStyle =
+      this.demoStyle === 'fail'
+        ? this.walkStartMs - m.walkMsLeft > CONFIG.demo.failPlayMs || m.dogsFreed >= m.walkTarget - CONFIG.demo.failStopShort
+          ? 'idle'
+          : 'play'
+        : this.demoStyle;
+    const move = chooseMove(m, style);
+    if (move.kind === 'wait') return;
+    this.run(() => applyMove(this.model, move));
   }
 
   // ---------- frame loop ----------
@@ -742,14 +771,14 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.auto) {
       this.autoTimer += delta;
-      if (this.autoTimer >= AUTO_EVERY_MS) {
+      if (this.autoTimer >= CONFIG.demo.stepMs) {
         this.autoTimer = 0;
         this.autoStep();
       }
       this.fpsTimer += delta;
       if (this.fpsTimer >= 1000) {
         this.fpsTimer = 0;
-        console.info(`[demo] fps=${this.game.loop.actualFps.toFixed(1)} walk=${(m.walkMsLeft / 1000).toFixed(1)}s score=${m.score}`);
+        console.info(`[demo] fps=${this.game.loop.actualFps.toFixed(1)} walk=${(m.walkMsLeft / 1000).toFixed(1)}s score=${m.score} chain=${m.chain} home=${m.dogsFreed}/${m.walkTarget}`);
       }
     }
     if (this.braid.animating || this.braid.dirty) this.braid.draw();

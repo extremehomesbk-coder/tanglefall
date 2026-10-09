@@ -22,7 +22,7 @@ export interface LevelDef {
 /** A dog's personality: what its leash does to the board. */
 export interface BreedDef {
   name: string;
-  emoji: string;
+  sprite: string; // public/dogs/<sprite>.svg (drawn by scripts/make_dogs.py)
   tangleWeight: number; // how often new knots land on its leash (1 = normal)
   pointsMul: number; // untwists on its leash score x this
   pushFactor: number; // push interval x this while the dog is still on the board
@@ -32,7 +32,7 @@ export interface BreedDef {
 
 export const CONFIG = {
   title: 'Tanglefall',
-  version: '0.4.0',
+  version: '0.5.0',
 
   board: {
     rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game
@@ -46,7 +46,7 @@ export const CONFIG = {
     twistNewKnotTop: 'same' as TwistNewKnotTop, // ASSUMPTION: the stacked knot copies the acted knot's top rope
     actOnEmptyGapFlips: false, // ASSUMPTION: acting on a gap with no knot does nothing and does not flip the frame
     stagesPerLevel: 3, // ASSUMPTION
-    stageSpeedup: 0.85, // push interval multiplier for each stage after the first within a level
+    stageSpeedup: 0.9, // push interval multiplier for each stage after the first within a level (sim 2026-10-09)
     twoTapMode: false, // first tap moves the frame, second tap acts (off = one tap does both)
     previewMode: 'off' as PreviewMode, // 'all' outlines every gap's bottom knot green/red; 'off' = read the knots yourself (v0.2 default)
     orientation: 'alternate' as Orientation, // 'alternate': each push layer (and each start row) flips which rope is on top, so stacks chain
@@ -61,21 +61,24 @@ export const CONFIG = {
   },
 
   breeds: [
-    { name: 'Mutt', emoji: '\u{1F415}', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: false },
-    { name: 'Poodle', emoji: '\u{1F429}', tangleWeight: 1, pointsMul: 2, pushFactor: 1, freeBonusMs: 0, cascade: false },
-    { name: 'Guide dog', emoji: '\u{1F9AE}', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: true },
-    { name: 'Service dog', emoji: '\u{1F415}\u200D\u{1F9BA}', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 6000, cascade: false },
-    { name: 'Pug', emoji: '\u{1F436}', tangleWeight: 2.2, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: false },
-    { name: 'Husky', emoji: '\u{1F43A}', tangleWeight: 1, pointsMul: 1, pushFactor: 0.8, freeBonusMs: 0, cascade: false },
+    { name: 'Mutt', sprite: 'mutt', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: false },
+    { name: 'Poodle', sprite: 'poodle', tangleWeight: 1, pointsMul: 2, pushFactor: 1, freeBonusMs: 0, cascade: false },
+    { name: 'Guide dog', sprite: 'guide', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: true },
+    { name: 'Service dog', sprite: 'service', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 6000, cascade: false },
+    { name: 'Pug', sprite: 'pug', tangleWeight: 2.2, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: false },
+    { name: 'Husky', sprite: 'husky', tangleWeight: 1, pointsMul: 1, pushFactor: 0.8, freeBonusMs: 0, cascade: false },
   ] as BreedDef[],
 
+  // Curve from scripts/sim.test.ts (2026-10-09): a new player (1.5 s/tap, 20% misreads) clears 1-1 ~78%, a casual
+  // one (1.1 s, 12%) ~95% through level 3 and ~33% at 4-1, a quick one (0.8 s, 5%) ~98% through level 5, 3% at 7-1.
   levels: [
-    { ropes: 6, colors: 3, pushIntervalMs: 4000, knotsPerGapPerPush: 0.45, initialKnots: 16, walkMs: 45000, dogsToFree: 5 },
-    { ropes: 7, colors: 4, pushIntervalMs: 3800, knotsPerGapPerPush: 0.5, initialKnots: 19, walkMs: 50000, dogsToFree: 6 },
-    { ropes: 7, colors: 4, pushIntervalMs: 3500, knotsPerGapPerPush: 0.55, initialKnots: 21, walkMs: 50000, dogsToFree: 7 },
-    { ropes: 8, colors: 5, pushIntervalMs: 3300, knotsPerGapPerPush: 0.55, initialKnots: 24, walkMs: 55000, dogsToFree: 7 },
-    { ropes: 8, colors: 6, pushIntervalMs: 3100, knotsPerGapPerPush: 0.6, initialKnots: 26, walkMs: 55000, dogsToFree: 8 },
-    { ropes: 9, colors: 7, pushIntervalMs: 2900, knotsPerGapPerPush: 0.65, initialKnots: 30, walkMs: 60000, dogsToFree: 9 },
+    { ropes: 6, colors: 3, pushIntervalMs: 5500, knotsPerGapPerPush: 0.3, initialKnots: 12, walkMs: 45000, dogsToFree: 5 },
+    { ropes: 6, colors: 3, pushIntervalMs: 5000, knotsPerGapPerPush: 0.35, initialKnots: 14, walkMs: 45000, dogsToFree: 5 },
+    { ropes: 7, colors: 4, pushIntervalMs: 4800, knotsPerGapPerPush: 0.35, initialKnots: 16, walkMs: 50000, dogsToFree: 6 },
+    { ropes: 7, colors: 4, pushIntervalMs: 4400, knotsPerGapPerPush: 0.4, initialKnots: 18, walkMs: 50000, dogsToFree: 6 },
+    { ropes: 8, colors: 5, pushIntervalMs: 4200, knotsPerGapPerPush: 0.4, initialKnots: 20, walkMs: 55000, dogsToFree: 7 },
+    { ropes: 8, colors: 5, pushIntervalMs: 3900, knotsPerGapPerPush: 0.45, initialKnots: 22, walkMs: 55000, dogsToFree: 7 },
+    { ropes: 9, colors: 6, pushIntervalMs: 3700, knotsPerGapPerPush: 0.45, initialKnots: 25, walkMs: 60000, dogsToFree: 8 },
   ] as LevelDef[],
   beyondLastLevel: { pushIntervalFactor: 0.92, minPushIntervalMs: 1500 },
 
@@ -123,6 +126,7 @@ export const CONFIG = {
     pushMs: 220,
     slideMs: 260,
     frameMoveMs: 110,
+    chainCallouts: { 4: 'x4 COMBO', 6: 'x6 ON FIRE', 8: 'x8 MAX!' } as Record<number, string>, // big centre text at these chains
   },
 
   layout: {
@@ -134,6 +138,16 @@ export const CONFIG = {
     maxSpacing: 62,
     beadRadius: 5,
     beadGap: 2,
+    dogWidth: 54, // sprite display width (px at 1x), capped at 0.95 x the rope spacing
+    dogCollar: { x: 74 / 120, y: 46 / 110 }, // where the leash meets the sprite (fraction of the SVG box)
+  },
+
+  /** Demo bot (?auto=1) only: clip recording knobs. URL params: demo=play|chain|fail, walk=L-S, walksec=N, hook=text|line2. */
+  demo: {
+    stepMs: 420, // bot thinking time between taps
+    failPlayMs: 7500, // demo=fail: the bot plays at most this long ...
+    failStopShort: 2, // ... and stops as soon as it is this many dogs short of the target, then the clock runs out (TIME'S UP clip)
+    hookMs: 2300, // how long the hook text stays before the walk starts moving
   },
 };
 

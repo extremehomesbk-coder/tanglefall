@@ -61,7 +61,7 @@ export class Hud {
       .setDepth(50);
 
     const footerTop = L.height - L.footerHeight;
-    this.flipRect = new Phaser.Geom.Rectangle(L.width - 16 - 132, footerTop + 22, 132, 56);
+    this.flipRect = new Phaser.Geom.Rectangle(L.width - 16 - 124, footerTop + 48, 124, 46);
     this.flipBg = scene.add.graphics().setDepth(50);
     this.flipText = scene.add
       .text(this.flipRect.centerX, this.flipRect.centerY, 'FLIP  ✦ 0', {
@@ -77,11 +77,11 @@ export class Hud {
       .text(16, 80, '', { fontFamily: FONT, fontSize: '13px', color: dim, fontStyle: 'bold' })
       .setDepth(50);
     this.homeText = scene.add
-      .text(16, footerTop + 46, '', { fontFamily: FONT, fontSize: '15px', color: txt, fontStyle: 'bold' })
+      .text(16, footerTop + 58, '', { fontFamily: FONT, fontSize: '15px', color: txt, fontStyle: 'bold' })
       .setDepth(50);
     this.candleBar = scene.add.graphics().setDepth(50);
     this.candleText = scene.add
-      .text(16, footerTop + 66, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb07a', fontStyle: 'bold' })
+      .text(16, footerTop + 78, '', { fontFamily: FONT, fontSize: '11px', color: '#ffb07a', fontStyle: 'bold' })
       .setDepth(50);
 
     this.setBonuses(0);
@@ -178,13 +178,13 @@ export class Hud {
     }
     const L = CONFIG.layout;
     const x = 16;
-    const y = L.height - L.footerHeight + 84;
+    const y = L.height - L.footerHeight + 92;
     const w = 150;
     this.candleText.setText('CANDLE: line up the dots, tap the bottom one');
     this.candleBar.fillStyle(0x2a2e3f, 1);
-    this.candleBar.fillRoundedRect(x, y, w, 10, 5);
+    this.candleBar.fillRoundedRect(x, y, w, 6, 3);
     this.candleBar.fillStyle(CONFIG.colors.candle, 1);
-    this.candleBar.fillRoundedRect(x, y, Math.max(6, w * fraction), 10, 5);
+    this.candleBar.fillRoundedRect(x, y, Math.max(6, w * fraction), 6, 3);
   }
 
   flashFlip(): void {

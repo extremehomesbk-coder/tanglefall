@@ -31,6 +31,7 @@ export class BraidView extends Phaser.GameObjects.Graphics {
   private next: BraidSnapshot;
   private readonly rows = CONFIG.board.rows;
   private readonly light: number[];
+  private readonly dark: number[];
   private readonly thick = CONFIG.layout.beadRadius * 2;
 
   constructor(
@@ -42,6 +43,7 @@ export class BraidView extends Phaser.GameObjects.Graphics {
     this.prev = initial;
     this.next = initial;
     this.light = CONFIG.colors.palette.map((c) => Phaser.Display.Color.ValueToColor(c).lighten(32).color);
+    this.dark = CONFIG.colors.palette.map((c) => Phaser.Display.Color.ValueToColor(c).darken(38).color);
     scene.add.existing(this);
     const maskG = scene.make.graphics({ x: 0, y: 0 });
     maskG.fillStyle(0xffffff, 1);
@@ -147,5 +149,23 @@ export class BraidView extends Phaser.GameObjects.Graphics {
     this.fillCircle(x1, y1, w / 2);
     this.lineStyle(2.5, light, 0.5 * a);
     this.lineBetween(x0 - 2.5, y0, x1 - 2.5, y1);
+    // twisted-rope texture: short diagonal ticks across the strand, so a leash reads as a leash and not a bar
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 4) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    const k = w * 0.42;
+    const ax = (-uy - ux) * k;
+    const ay = (ux - uy) * k;
+    const n = Math.max(1, Math.round(len / 8));
+    this.lineStyle(1.8, this.dark[colorIndex % this.dark.length], 0.55 * a);
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const cx = x0 + dx * t;
+      const cy = y0 + dy * t;
+      this.lineBetween(cx - ax, cy - ay, cx + ax, cy + ay);
+    }
   }
 }
