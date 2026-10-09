@@ -26,6 +26,8 @@ export class Game {
   stage = 1;
   candle: CandleState | null = null;
   status: Status = 'playing';
+  chainMsLeft = 0;
+  pushCount = 0;
 
   private readonly rng: Rng;
   private nextId = 1;
@@ -118,6 +120,16 @@ export class Game {
     return this.candle !== null && this.ropeIndex(this.candle.ropeId) === this.candle.targetIndex;
   }
 
+  /** How many gaps' bottom knots the current frame would untwist. 0 = stuck: twist, or spend a bonus. */
+  readyCount(): number {
+    let n = 0;
+    for (let g = 0; g < this.gapCount; g++) {
+      const k = this.bottomKnot(g);
+      if (k && this.wouldUntwist(k)) n++;
+    }
+    return n;
+  }
+
   // ---------- stage setup ----------
 
   startStage(level = this.level, stage = this.stage): void {
@@ -128,9 +140,17 @@ export class Game {
     this.knots = [];
     this.candle = null;
     this.chain = 0;
+    this.chainMsLeft = 0;
+    this.pushCount = 0;
     this.status = 'playing';
-    this.frameType = 'blue';
-    for (let i = 0; i < def.ropes; i++) this.ropes.push({ id: this.nextId++, color: this.rng.int(def.colors) });
+    for (let i = 0; i < def.ropes; i++) {
+      let color = this.rng.int(def.colors);
+      const prev = this.ropes[i - 1];
+      if (!this.cfg.rules.adjacentSameColor && def.colors > 1 && prev && color === prev.color) {
+        color = (color + 1 + this.rng.int(def.colors - 1)) % def.colors;
+      }
+      this.ropes.push({ id: this.nextId++, color });
+    }
 
     const maxRow = Math.max(1, Math.floor(this.cfg.board.rows * this.cfg.board.startRowsFraction)) - 1;
     // Every rope starts with at least one knot, otherwise it would vanish on the spot.
@@ -141,6 +161,12 @@ export class Game {
     let tries = 0;
     while (this.knots.length < def.initialKnots && tries++ < 200) this.spawnKnot(this.rng.int(this.gapCount), 0, maxRow);
     this.frameGap = Math.floor((this.gapCount - 1) / 2);
+    // Open with whichever frame has more work ready, so the first move is never forced to be a twist.
+    this.frameType = 'blue';
+    const readyBlue = this.readyCount();
+    this.frameType = 'red';
+    const readyRed = this.readyCount();
+    this.frameType = readyRed > readyBlue ? 'red' : 'blue';
   }
 
   nextStage(): void {
@@ -188,11 +214,15 @@ export class Game {
   push(): void {
     if (this.status !== 'playing') return;
     for (const k of this.knots) k.row += 1;
+    this.pushCount += 1;
     const spawned: Knot[] = [];
-    const want = this.levelDef.knotsPerPush;
+    const raw = this.levelDef.knotsPerGapPerPush * this.gapCount;
+    const want = Math.floor(raw) + (this.rng.chance(raw - Math.floor(raw)) ? 1 : 0);
+    const layerTop: TopSide | undefined =
+      this.cfg.rules.orientation === 'alternate' ? (this.pushCount % 2 === 0 ? 'left' : 'right') : undefined;
     let tries = 0;
     while (spawned.length < want && this.gapCount > 0 && tries++ < this.gapCount * 3) {
-      const k = this.spawnKnot(this.rng.int(this.gapCount), 0, this.cfg.board.spawnRows - 1);
+      const k = this.spawnKnot(this.rng.int(this.gapCount), 0, this.cfg.board.spawnRows - 1, layerTop);
       if (k) spawned.push(k);
     }
     this.emit({ type: 'push', spawned });
@@ -202,9 +232,17 @@ export class Game {
     }
   }
 
-  /** Candle countdown. */
+  /** Candle countdown and chain decay. */
   tick(dtMs: number): void {
-    if (!this.candle || this.status !== 'playing') return;
+    if (this.status !== 'playing') return;
+    if (this.chain > 0) {
+      this.chainMsLeft -= dtMs;
+      if (this.chainMsLeft <= 0) {
+        this.chain = 0;
+        this.emit({ type: 'chain', chain: 0 });
+      }
+    }
+    if (!this.candle) return;
     this.candle.msLeft -= dtMs;
     if (this.candle.msLeft <= 0) {
       this.candle = null;
@@ -252,17 +290,22 @@ export class Game {
     return knot;
   }
 
-  private spawnKnot(gap: number, rowMin: number, rowMax: number): Knot | null {
+  private spawnKnot(gap: number, rowMin: number, rowMax: number, forceTop?: TopSide): Knot | null {
     const free: number[] = [];
     for (let r = rowMin; r <= rowMax; r++) if (this.rowFree(gap, r)) free.push(r);
     if (free.length === 0) return null;
     const row = free[this.rng.int(free.length)];
-    return this.addKnot(gap, row, this.rng.chance(0.5) ? 'left' : 'right', this.rollPower());
+    let top: TopSide;
+    if (forceTop) top = forceTop;
+    else if (this.cfg.rules.orientation === 'alternate') top = row % 2 === 0 ? 'left' : 'right';
+    else top = this.rng.chance(0.5) ? 'left' : 'right';
+    return this.addKnot(gap, row, top, this.rollPower());
   }
 
   private untwist(knot: Knot): void {
     this.knots = this.knots.filter((k) => k.id !== knot.id);
     this.chain = Math.min(this.chain + 1, this.cfg.scoring.chainMax);
+    this.chainMsLeft = this.cfg.rules.chainWindowMs;
     const points = this.cfg.scoring.untwist * this.chain;
     this.score += points;
     this.emit({ type: 'untwist', knot, chain: this.chain, points });
@@ -280,6 +323,8 @@ export class Game {
 
   private twist(knot: Knot): void {
     this.chain = 0;
+    this.chainMsLeft = 0;
+    this.emit({ type: 'chain', chain: 0 });
     this.score = Math.max(0, this.score - this.cfg.scoring.twistPenalty);
     if (this.cfg.rules.twistMode === 'flipTop') {
       knot.top = other(knot.top);

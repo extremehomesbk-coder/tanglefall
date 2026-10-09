@@ -21,6 +21,7 @@ function setup(top: 'left' | 'right'): { g: Game; knot: Knot } {
     if (i === 1 || i === 2 || i === 3) continue;
     g.knots.push({ id: 901 + i, left: g.ropes[i].id, right: g.ropes[i + 1].id, top: 'left', row: i, power: 'none' });
   }
+  g.frameType = 'blue';
   g.moveFrame(2);
   g.drain();
   return { g, knot: g.knots[0] };
@@ -29,7 +30,7 @@ function setup(top: 'left' | 'right'): { g: Game; knot: Knot } {
 describe('frame parity', () => {
   it('blue untwists a knot whose RIGHT rope is on top, then flips to red', () => {
     const { g, knot } = setup('right');
-    expect(g.frameType).toBe('blue');
+    g.frameType = 'blue';
     g.act();
     const ev = g.drain().map((e) => e.type);
     expect(ev).toContain('untwist');
@@ -70,6 +71,40 @@ describe('frame parity', () => {
     expect(g.wouldUntwist(knot, 'red')).toBe(true);
   });
 
+  it('alternate orientation: push layers flip top side, start rows alternate by row parity', () => {
+    const g = fresh();
+    for (const k of g.knots) expect(k.top).toBe(k.row % 2 === 0 ? 'left' : 'right');
+    g.push();
+    const first = g.drain().find((e) => e.type === 'push');
+    const tops1 = new Set((first && first.type === 'push' ? first.spawned : []).map((k) => k.top));
+    expect(tops1.size).toBe(1);
+    g.push();
+    const second = g.drain().find((e) => e.type === 'push');
+    const tops2 = new Set((second && second.type === 'push' ? second.spawned : []).map((k) => k.top));
+    expect(tops2.size).toBe(1);
+    expect([...tops1][0]).not.toBe([...tops2][0]);
+  });
+
+  it('a stage never opens stuck', () => {
+    for (let seed = 1; seed < 40; seed++) expect(fresh(seed).readyCount()).toBeGreaterThan(0);
+  });
+
+  it('neighbouring ropes never start with the same colour', () => {
+    for (let seed = 1; seed < 40; seed++) {
+      const g = fresh(seed);
+      for (let i = 1; i < g.ropes.length; i++) expect(g.ropes[i].color).not.toBe(g.ropes[i - 1].color);
+    }
+  });
+
+  it('the chain decays when no untwist lands inside the window', () => {
+    const { g } = setup('right');
+    g.act();
+    expect(g.chain).toBe(1);
+    g.tick(CONFIG.rules.chainWindowMs + 1);
+    expect(g.chain).toBe(0);
+    expect(g.drain().some((e) => e.type === 'chain')).toBe(true);
+  });
+
   it('a bonus flips the frame without acting', () => {
     const g = fresh();
     g.bonuses = 1;
@@ -86,7 +121,7 @@ describe('ropes and pushes', () => {
     const ropeCount = g.ropes.length;
     g.act();
     const removed = g.drain().filter((e) => e.type === 'ropeRemoved');
-    expect(removed.length).toBe(2); // both ropes of the lone knot were otherwise knot-free
+    expect(removed.length).toBe(2); // both ropes of the lone knot were otherwise knot-free (setup keeps the rest alive)
     expect(g.ropes.length).toBe(ropeCount - 2);
   });
 

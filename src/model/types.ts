@@ -25,6 +25,7 @@ export type GameEvent =
   | { type: 'frameFlipped'; frameType: FrameType; spent: boolean }
   | { type: 'push'; spawned: Knot[] }
   | { type: 'bonus'; bonuses: number }
+  | { type: 'chain'; chain: number }
   | { type: 'candleStart'; ropeId: number; targetIndex: number; ms: number }
   | { type: 'candleEnd'; success: boolean }
   | { type: 'brush'; ropeIds: number[] }

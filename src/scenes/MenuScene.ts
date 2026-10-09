@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../config';
-import { getHighScore, getTwoTap, setTwoTap } from '../storage';
+import { getHighScore, getMute, getTwoTap, setMute, setTwoTap } from '../storage';
+import { setMuted, unlockAudio } from '../audio';
 import { drawSlantFrame } from '../view/FrameView';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
@@ -9,6 +10,8 @@ export class MenuScene extends Phaser.Scene {
   private twoTap = false;
   private toggleText!: Phaser.GameObjects.Text;
   private toggleRect!: Phaser.Geom.Rectangle;
+  private soundText!: Phaser.GameObjects.Text;
+  private soundRect!: Phaser.Geom.Rectangle;
 
   constructor() {
     super('menu');
@@ -17,6 +20,7 @@ export class MenuScene extends Phaser.Scene {
   create(): void {
     const { width, height } = CONFIG.layout;
     this.twoTap = getTwoTap(CONFIG.rules.twoTapMode);
+    setMuted(getMute());
 
     this.add
       .text(width / 2, height * 0.2, CONFIG.title.toUpperCase(), {
@@ -43,13 +47,12 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: [fb, fr], y: '+=6', duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     const rules = [
-      'Tap a gap to work its lowest knot.',
-      'BLUE frame undoes knots where the RIGHT rope is on top.',
-      'RED frame undoes knots where the LEFT rope is on top.',
-      'The frame flips after every move. Wrong frame = tighter knot.',
-      'Green outline = will untwist. Red = will tighten.',
-      'Clear every knot on a rope and the rope falls away.',
-      'Knots that reach the floor end the game.',
+      'Six dogs, six leashes, one tangle. Tap a gap to work its lowest knot.',
+      'BLUE frame undoes knots where the RIGHT leash is on top (bright strand).',
+      'RED frame undoes knots where the LEFT leash is on top.',
+      'The frame flips after every move. Wrong frame = tighter knot and the bar jumps.',
+      'Chain untwists fast for x2..x8. Free a dog and the bar resets.',
+      'A knot that reaches the floor ends the walk.',
     ];
     this.add
       .text(width / 2, height * 0.42, rules.join('\n'), {
@@ -63,7 +66,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
 
     const play = this.add
-      .text(width / 2, height * 0.72, 'TAP TO PLAY', {
+      .text(width / 2, height * 0.755, 'TAP TO PLAY', {
         fontFamily: FONT,
         fontSize: '28px',
         color: CONFIG.colors.text,
@@ -73,25 +76,27 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: play, alpha: { from: 1, to: 0.35 }, duration: 650, yoyo: true, repeat: -1 });
 
     this.add
-      .text(width / 2, height * 0.72 + 36, `BEST ${getHighScore()}`, {
+      .text(width / 2, height * 0.755 + 32, `BEST ${getHighScore()}`, {
         fontFamily: FONT,
         fontSize: '15px',
         color: CONFIG.colors.textDim,
       })
       .setOrigin(0.5);
 
-    this.toggleRect = new Phaser.Geom.Rectangle(width / 2 - 110, height * 0.84, 220, 44);
+    this.toggleRect = new Phaser.Geom.Rectangle(width / 2 - 150, height * 0.855, 140, 44);
+    this.soundRect = new Phaser.Geom.Rectangle(width / 2 + 10, height * 0.855, 140, 44);
     const g = this.add.graphics();
-    g.fillStyle(0x23263a, 1);
-    g.fillRoundedRect(this.toggleRect.x, this.toggleRect.y, this.toggleRect.width, this.toggleRect.height, 12);
-    g.lineStyle(2, 0x343850, 1);
-    g.strokeRoundedRect(this.toggleRect.x, this.toggleRect.y, this.toggleRect.width, this.toggleRect.height, 12);
+    for (const r of [this.toggleRect, this.soundRect]) {
+      g.fillStyle(0x23263a, 1);
+      g.fillRoundedRect(r.x, r.y, r.width, r.height, 12);
+      g.lineStyle(2, 0x343850, 1);
+      g.strokeRoundedRect(r.x, r.y, r.width, r.height, 12);
+    }
     this.toggleText = this.add
-      .text(this.toggleRect.centerX, this.toggleRect.centerY, '', {
-        fontFamily: FONT,
-        fontSize: '15px',
-        color: CONFIG.colors.text,
-      })
+      .text(this.toggleRect.centerX, this.toggleRect.centerY, '', { fontFamily: FONT, fontSize: '14px', color: CONFIG.colors.text })
+      .setOrigin(0.5);
+    this.soundText = this.add
+      .text(this.soundRect.centerX, this.soundRect.centerY, '', { fontFamily: FONT, fontSize: '14px', color: CONFIG.colors.text })
       .setOrigin(0.5);
     this.refreshToggle();
 
@@ -104,9 +109,17 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      unlockAudio();
       if (this.toggleRect.contains(p.x, p.y)) {
         this.twoTap = !this.twoTap;
         setTwoTap(this.twoTap);
+        this.refreshToggle();
+        return;
+      }
+      if (this.soundRect.contains(p.x, p.y)) {
+        const mute = !getMute();
+        setMute(mute);
+        setMuted(mute);
         this.refreshToggle();
         return;
       }
@@ -117,7 +130,8 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private refreshToggle(): void {
-    this.toggleText.setText(`Two-tap mode: ${this.twoTap ? 'ON' : 'OFF'}`);
+    this.toggleText.setText(`Two-tap: ${this.twoTap ? 'ON' : 'OFF'}`);
+    this.soundText.setText(`Sound: ${getMute() ? 'OFF' : 'ON'}`);
   }
 
   private start(): void {

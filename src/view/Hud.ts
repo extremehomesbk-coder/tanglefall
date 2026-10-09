@@ -19,6 +19,7 @@ export class Hud {
   private readonly flipRect: Phaser.Geom.Rectangle;
   private readonly candleBar: Phaser.GameObjects.Graphics;
   private readonly candleText: Phaser.GameObjects.Text;
+  private readonly readyText: Phaser.GameObjects.Text;
   flipEnabled = false;
 
   constructor(private readonly scene: Phaser.Scene) {
@@ -69,9 +70,12 @@ export class Hud {
       .setOrigin(0.5)
       .setDepth(51);
 
+    this.readyText = scene.add
+      .text(16, 80, '', { fontFamily: FONT, fontSize: '13px', color: dim, fontStyle: 'bold' })
+      .setDepth(50);
     this.candleBar = scene.add.graphics().setDepth(50);
     this.candleText = scene.add
-      .text(16, footerTop + 30, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb07a', fontStyle: 'bold' })
+      .text(16, footerTop + 50, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb07a', fontStyle: 'bold' })
       .setDepth(50);
 
     this.setBonuses(0);
@@ -93,6 +97,17 @@ export class Hud {
 
   setChain(chain: number): void {
     this.chainText.setText(chain >= 2 ? `CHAIN x${chain}` : '');
+    if (chain >= 2) this.scene.tweens.add({ targets: this.chainText, scale: { from: 1.5, to: 1 }, duration: 180, ease: 'Back.easeOut' });
+  }
+
+  /** ready = gaps the current frame can untwist right now; 0 = stuck. */
+  setReady(ready: number, bonuses: number): void {
+    if (ready > 0) {
+      this.readyText.setText(`${ready} READY`).setColor('#9dffb0');
+    } else {
+      this.readyText.setText(bonuses > 0 ? 'STUCK: flip or tighten' : 'STUCK: tighten one to flip').setColor('#ff6b6b');
+      this.scene.tweens.add({ targets: this.readyText, scale: { from: 1.2, to: 1 }, duration: 200 });
+    }
   }
 
   setFrame(now: FrameType): void {
@@ -130,7 +145,7 @@ export class Hud {
     }
     const L = CONFIG.layout;
     const x = 16;
-    const y = L.height - L.footerHeight + 50;
+    const y = L.height - L.footerHeight + 72;
     const w = 150;
     this.candleText.setText('CANDLE: line up the dots, tap the bottom one');
     this.candleBar.fillStyle(0x2a2e3f, 1);

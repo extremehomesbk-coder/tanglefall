@@ -1,5 +1,6 @@
 const KEY_BEST = 'tanglefall.best';
 const KEY_TWOTAP = 'tanglefall.twoTap';
+const KEY_MUTE = 'tanglefall.mute';
 
 function read(key: string): string | null {
   try {
@@ -33,4 +34,12 @@ export function getTwoTap(fallback: boolean): boolean {
 
 export function setTwoTap(on: boolean): void {
   write(KEY_TWOTAP, on ? '1' : '0');
+}
+
+export function getMute(): boolean {
+  return read(KEY_MUTE) === '1';
+}
+
+export function setMute(on: boolean): void {
+  write(KEY_MUTE, on ? '1' : '0');
 }

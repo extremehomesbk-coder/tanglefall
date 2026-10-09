@@ -3,6 +3,7 @@ import { CONFIG } from '../config';
 import { Game } from '../model/game';
 import type { GameEvent, Knot, Rope } from '../model/types';
 import { getHighScore, setHighScore } from '../storage';
+import { playBonus, playGameOver, playPush, playRopeClear, playTwist, playUntwist, unlockAudio } from '../audio';
 import { FrameView } from '../view/FrameView';
 import { Hud } from '../view/Hud';
 import { KnotView } from '../view/KnotView';
@@ -10,6 +11,7 @@ import { Layout } from '../view/layout';
 import { RopeView } from '../view/RopeView';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+const DOGS = ['\u{1F415}', '\u{1F429}', '\u{1F9AE}', '\u{1F415}\u200D\u{1F9BA}', '\u{1F436}', '\u{1F43A}'];
 
 export interface GameSceneData {
   twoTap?: boolean;
@@ -19,6 +21,7 @@ export class GameScene extends Phaser.Scene {
   private model!: Game;
   private layout!: Layout;
   private ropeViews = new Map<number, RopeView>();
+  private dogViews = new Map<number, Phaser.GameObjects.Text>();
   private knotViews = new Map<number, KnotView>();
   private frame!: FrameView;
   private hud!: Hud;
@@ -42,6 +45,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.ropeViews.clear();
+    this.dogViews.clear();
     this.knotViews.clear();
     this.overlay = null;
     this.pushTimer = 0;
@@ -59,6 +63,25 @@ export class GameScene extends Phaser.Scene {
     this.buildCandleMarkers();
     this.buildStageViews();
     this.bindInput();
+    this.getReady();
+  }
+
+  private getReady(): void {
+    const L = this.layout;
+    const t = this.add
+      .text(L.width / 2, L.boardTop + L.boardHeight * 0.4, 'UNTANGLE!', {
+        fontFamily: FONT,
+        fontSize: '40px',
+        color: CONFIG.colors.text,
+        fontStyle: 'bold',
+        stroke: '#000',
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5)
+      .setDepth(90)
+      .setScale(0.5);
+    this.tweens.add({ targets: t, scale: 1.1, duration: 250, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, y: t.y - 30, delay: 650, duration: 300, onComplete: () => t.destroy() });
   }
 
   // ---------- static board ----------
@@ -109,8 +132,10 @@ export class GameScene extends Phaser.Scene {
 
   private buildStageViews(): void {
     for (const v of this.ropeViews.values()) v.destroy();
+    for (const v of this.dogViews.values()) v.destroy();
     for (const v of this.knotViews.values()) v.destroy();
     this.ropeViews.clear();
+    this.dogViews.clear();
     this.knotViews.clear();
     const m = this.model;
     this.layout.setRopeCount(m.ropes.length);
@@ -123,6 +148,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.setBonuses(m.bonuses);
     this.hud.setChain(m.chain);
     this.hud.setFrame(m.frameType);
+    this.hud.setReady(m.readyCount(), m.bonuses);
     this.frame.redraw(m.frameType);
     this.placeFrame(false);
     this.refreshPreview();
@@ -131,6 +157,12 @@ export class GameScene extends Phaser.Scene {
   private makeRopeView(rope: Rope, x: number): RopeView {
     const v = new RopeView(this, x, this.layout.boardTop + 4, this.layout.boardBottom - 4, rope.color).setDepth(10);
     this.ropeViews.set(rope.id, v);
+    const dog = this.add
+      .text(x, this.layout.boardBottom + 20, DOGS[rope.id % DOGS.length], { fontSize: '24px' })
+      .setOrigin(0.5)
+      .setDepth(11);
+    this.tweens.add({ targets: dog, y: dog.y - 3, duration: 500 + (rope.id % 5) * 90, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.dogViews.set(rope.id, dog);
     return v;
   }
 
@@ -172,9 +204,13 @@ export class GameScene extends Phaser.Scene {
     else this.frame.setPosition(x, y);
   }
 
-  /** Green/red outline on the bottom-most knot of every gap for the current frame type. */
+  /** Green/red outline on the bottom-most knot of every gap for the current frame type (previewMode 'all'). */
   private refreshPreview(): void {
     const m = this.model;
+    if (CONFIG.rules.previewMode === 'off') {
+      for (const v of this.knotViews.values()) v.setPreview('none');
+      return;
+    }
     const bottoms = new Set<number>();
     for (let g = 0; g < m.gapCount; g++) {
       const k = m.bottomKnot(g);
@@ -194,6 +230,8 @@ export class GameScene extends Phaser.Scene {
       if (!v) return;
       this.tweens.killTweensOf(v);
       this.tweens.add({ targets: v, x: this.layout.colX(i, n), duration: ms, ease: 'Quad.easeInOut' });
+      const dog = this.dogViews.get(rope.id);
+      if (dog) this.tweens.add({ targets: dog, x: this.layout.colX(i, n), duration: ms, ease: 'Quad.easeInOut' });
     });
     for (const knot of m.knots) {
       const v = this.knotViews.get(knot.id);
@@ -219,6 +257,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onTap(x: number, y: number): void {
+    unlockAudio();
     if (this.overlay) {
       this.dismissOverlay();
       return;
@@ -265,6 +304,7 @@ export class GameScene extends Phaser.Scene {
     for (const e of events) this.handleOne(e);
     this.hud.setScore(this.model.score);
     this.hud.setChain(this.model.chain);
+    this.hud.setReady(this.model.readyCount(), this.model.bonuses);
     if (this.model.score > this.best) {
       this.best = this.model.score;
       this.hud.setBest(this.best);
@@ -281,8 +321,12 @@ export class GameScene extends Phaser.Scene {
         const v = this.knotViews.get(e.knot.id);
         if (v) this.animateUntwist(v, e.knot, e.points, e.chain);
         this.knotViews.delete(e.knot.id);
+        playUntwist(e.chain);
         break;
       }
+      case 'chain':
+        this.hud.setChain(e.chain);
+        break;
       case 'twist': {
         const v = this.knotViews.get(e.knot.id);
         if (v) this.animateTwist(v, e.knot);
@@ -293,6 +337,10 @@ export class GameScene extends Phaser.Scene {
         }
         this.floatText(this.layout.gapX(m.gapOf(e.knot), n), this.layout.rowY(e.knot.row) - 20, 'TIGHTER!', '#ff6b6b');
         this.cameras.main.shake(90, 0.004);
+        playTwist();
+        // mistakes hurry the bar along
+        this.pushTimer = Math.min(m.pushIntervalMs - 60, this.pushTimer + m.pushIntervalMs * CONFIG.rules.twistPushPenalty);
+        this.tweens.add({ targets: this.pushStamp, alpha: { from: 1, to: 0 }, duration: 250 });
         break;
       }
       case 'noKnot':
@@ -302,6 +350,16 @@ export class GameScene extends Phaser.Scene {
         const v = this.ropeViews.get(e.rope.id);
         if (v) this.animateRopeRemove(v, e.rope);
         this.ropeViews.delete(e.rope.id);
+        const dog = this.dogViews.get(e.rope.id);
+        if (dog) {
+          this.dogViews.delete(e.rope.id);
+          this.tweens.killTweensOf(dog);
+          const dir = dog.x < this.layout.centerX ? -1 : 1;
+          dog.setFlipX(dir > 0);
+          this.tweens.add({ targets: dog, x: dog.x + dir * 260, y: dog.y - 20, angle: dir * 25, duration: 600, ease: 'Quad.easeIn', onComplete: () => dog.destroy() });
+        }
+        playRopeClear();
+        if (e.cause === 'untwist' && CONFIG.rules.ropeClearResetsPush) this.pushTimer = 0;
         for (const k of e.knots) {
           const kv = this.knotViews.get(k.id);
           if (kv) this.tweens.add({ targets: kv, scale: 0, alpha: 0, duration: 200, onComplete: () => kv.destroy() });
@@ -310,7 +368,7 @@ export class GameScene extends Phaser.Scene {
         this.floatText(
           this.layout.centerX,
           this.layout.boardTop + 60,
-          e.cause === 'candle' ? `BURNED +${CONFIG.scoring.candleRope}` : `ROPE CLEAR +${CONFIG.scoring.ropeRemoved}`,
+          e.cause === 'candle' ? `BURNED +${CONFIG.scoring.candleRope}` : `DOG FREE! +${CONFIG.scoring.ropeRemoved}`,
           '#ffd166',
           22,
         );
@@ -327,9 +385,11 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'push':
         this.animatePush(e.spawned);
+        playPush();
         break;
       case 'bonus':
         this.hud.setBonuses(e.bonuses);
+        playBonus();
         break;
       case 'candleStart':
         this.placeCandleMarkers();
@@ -359,6 +419,7 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'gameOver':
         if (m.score > getHighScore()) setHighScore(m.score);
+        playGameOver();
         this.cameras.main.shake(350, 0.012);
         this.time.delayedCall(700, () => this.showOverlay('gameOver', 0));
         break;
@@ -386,7 +447,11 @@ export class GameScene extends Phaser.Scene {
     this.burst(v.x, v.y, 8, 0xffffff);
     this.wiggle(knot.left);
     this.wiggle(knot.right);
-    this.floatText(v.x, v.y - 16, chain > 1 ? `+${points}  x${chain}` : `+${points}`, '#9dffb0');
+    for (const id of [knot.left, knot.right]) {
+      const dog = this.dogViews.get(id);
+      if (dog) this.tweens.add({ targets: dog, scale: { from: 1.35, to: 1 }, duration: 220, ease: 'Back.easeOut' });
+    }
+    this.floatText(v.x, v.y - 16, chain > 1 ? `+${points}  x${chain}` : `+${points}`, '#9dffb0', 14 + Math.min(chain, 8) * 2);
   }
 
   private animateTwist(v: KnotView, knot: Knot): void {
@@ -535,6 +600,7 @@ export class GameScene extends Phaser.Scene {
       this.pushTimer = 0;
       this.buildStageViews();
       this.placeCandleMarkers();
+      this.getReady();
       return;
     }
     if (CONFIG.rules.restartFromLevelOne) {

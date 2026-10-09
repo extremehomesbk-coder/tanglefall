@@ -6,21 +6,23 @@
 export type TwistMode = 'addKnot' | 'flipTop';
 export type TwistNewKnotTop = 'same' | 'opposite' | 'random';
 export type BrushMode = 'match' | 'cycle';
+export type PreviewMode = 'off' | 'all';
+export type Orientation = 'alternate' | 'random';
 
 export interface LevelDef {
   ropes: number; // ropes hanging at stage start
   colors: number; // how many palette colours are in play
   pushIntervalMs: number; // bar push interval at stage 1 of this level
-  knotsPerPush: number; // new knots created at the top by each push
+  knotsPerGapPerPush: number; // new knots per push = this x gaps (fraction rolled), so fewer ropes = fewer knots
   initialKnots: number; // knots at stage start (every rope gets at least one)
 }
 
 export const CONFIG = {
   title: 'Tanglefall',
-  version: '0.1.0',
+  version: '0.2.0',
 
   board: {
-    rows: 20, // knot rows from top to bottom; a knot pushed past the last row ends the game
+    rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game
     dangerRows: 4, // rows from the bottom where knots glow and pulse
     startRowsFraction: 1 / 3, // initial knots are bunched in the top third
     spawnRows: 2, // knots created by a push land in rows 0..spawnRows-1
@@ -31,21 +33,27 @@ export const CONFIG = {
     twistNewKnotTop: 'same' as TwistNewKnotTop, // ASSUMPTION: the stacked knot copies the acted knot's top rope
     actOnEmptyGapFlips: false, // ASSUMPTION: acting on a gap with no knot does nothing and does not flip the frame
     stagesPerLevel: 3, // ASSUMPTION
-    stageSpeedup: 0.88, // push interval multiplier for each stage after the first within a level
+    stageSpeedup: 0.85, // push interval multiplier for each stage after the first within a level
     twoTapMode: false, // first tap moves the frame, second tap acts (off = one tap does both)
+    previewMode: 'off' as PreviewMode, // 'all' outlines every gap's bottom knot green/red; 'off' = read the knots yourself (v0.2 default)
+    orientation: 'alternate' as Orientation, // 'alternate': each push layer (and each start row) flips which rope is on top, so stacks chain
+    adjacentSameColor: false, // false: neighbouring ropes never start with the same colour (only the brush creates free knots)
+    twistPushPenalty: 0.35, // a twist moves the push timer forward by this fraction of the interval
+    ropeClearResetsPush: true, // clearing a rope resets the push timer (a breather)
+    chainWindowMs: 1600, // the chain multiplier decays if no untwist lands within this window
     candleTargetOffset: -1, // ASSUMPTION: the bottom red dot sits this many slots left of the marked rope
     restartFromLevelOne: true, // ASSUMPTION: game over restarts at 1-1
   },
 
   levels: [
-    { ropes: 7, colors: 4, pushIntervalMs: 7000, knotsPerPush: 2, initialKnots: 10 },
-    { ropes: 7, colors: 5, pushIntervalMs: 6200, knotsPerPush: 2, initialKnots: 12 },
-    { ropes: 8, colors: 5, pushIntervalMs: 5600, knotsPerPush: 3, initialKnots: 14 },
-    { ropes: 8, colors: 6, pushIntervalMs: 5000, knotsPerPush: 3, initialKnots: 16 },
-    { ropes: 9, colors: 6, pushIntervalMs: 4500, knotsPerPush: 3, initialKnots: 18 },
-    { ropes: 9, colors: 7, pushIntervalMs: 4000, knotsPerPush: 4, initialKnots: 20 },
+    { ropes: 6, colors: 3, pushIntervalMs: 4500, knotsPerGapPerPush: 0.4, initialKnots: 9 },
+    { ropes: 7, colors: 4, pushIntervalMs: 4200, knotsPerGapPerPush: 0.45, initialKnots: 11 },
+    { ropes: 7, colors: 4, pushIntervalMs: 3800, knotsPerGapPerPush: 0.5, initialKnots: 13 },
+    { ropes: 8, colors: 5, pushIntervalMs: 3500, knotsPerGapPerPush: 0.5, initialKnots: 15 },
+    { ropes: 8, colors: 6, pushIntervalMs: 3200, knotsPerGapPerPush: 0.55, initialKnots: 17 },
+    { ropes: 9, colors: 7, pushIntervalMs: 3000, knotsPerGapPerPush: 0.6, initialKnots: 19 },
   ] as LevelDef[],
-  beyondLastLevel: { pushIntervalFactor: 0.92, minPushIntervalMs: 1800 },
+  beyondLastLevel: { pushIntervalFactor: 0.92, minPushIntervalMs: 1500 },
 
   powerUps: {
     sparkleRate: 0.12, // chance a new knot sparkles
@@ -57,7 +65,7 @@ export const CONFIG = {
 
   scoring: {
     untwist: 100, // points per untwist, multiplied by the chain
-    chainMax: 8, // chain multiplier cap (consecutive untwists; a twist resets it)
+    chainMax: 8, // chain multiplier cap (consecutive untwists inside chainWindowMs; a twist resets it)
     twistPenalty: 0, // points lost per twist
     ropeRemoved: 500, // rope cleared by untwisting its last knot
     candleRope: 300, // rope burned away by a candle

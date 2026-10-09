@@ -67,9 +67,12 @@ export class KnotView extends Phaser.GameObjects.Container {
     // left rope travels top-left -> bottom-right; right rope travels top-right -> bottom-left
     const x1 = side === 'left' ? -hw : hw;
     const x2 = -x1;
-    const color = side === 'left' ? left : right;
+    const base = side === 'left' ? left : right;
+    const color = onTop ? base : Phaser.Display.Color.ValueToColor(base).darken(45).color;
     if (onTop) {
-      g.lineStyle(thick + 5, CONFIG.colors.board, 1);
+      g.lineStyle(thick + 6, 0xffffff, 0.9);
+      g.lineBetween(x1, -hh, x2, hh);
+      g.lineStyle(thick + 3, CONFIG.colors.board, 1);
       g.lineBetween(x1, -hh, x2, hh);
     }
     g.lineStyle(thick, color, 1);

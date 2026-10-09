@@ -4,6 +4,22 @@ Working title. Original mechanics-inspired puzzle; no third-party names, art, so
 Every number below lives in `src/config.ts`. Lines marked **ASSUMPTION** were not confirmed by the
 brief and are the first things to playtest.
 
+## v0.2 (2026-10-09): why it changed
+The first build played as "tap the green ones". v0.2 makes moves scarce and the clock real:
+- `rules.previewMode = 'off'`: no green/red outlines; the rope on top is the bright strand with a white edge,
+  and the HUD shows `N READY` (gaps the current frame can untwist) or `STUCK` (`'all'` restores the outlines).
+- `rules.orientation = 'alternate'`: start rows alternate top side by row parity and every push layer flips it,
+  so a stack of adjacent rows drills down in an alternating chain while far-apart knots block each other.
+- `rules.adjacentSameColor = false`: no free same-colour knots at start; only the brush makes them.
+- `rules.twistPushPenalty = 0.35`: a twist moves the push timer forward; `rules.ropeClearResetsPush` gives a breather.
+- `rules.chainWindowMs = 1600`: the chain multiplier decays unless the next untwist lands fast.
+- Pace: 16 rows, 4.5 s pushes at 1-1 (x0.85 per stage), knots per push = `knotsPerGapPerPush` x gaps
+  (so the last ropes stay finishable), 6 ropes / 3 colours at level 1.
+- A stage never opens stuck: the starting frame is whichever type has more knots ready.
+- Theme: dogs on leashes (placeholder emoji at the foot of each rope; a freed dog runs off). Synthesized sounds
+  (`src/audio.ts`, WebAudio, no assets): untwists climb a pentatonic scale with the chain, twists buzz, a freed dog
+  yips. Menu toggle `Sound: ON/OFF` (stored in localStorage).
+
 ## The board
 
 - Several vertical ropes (level 1: 7) hang side by side, each a solid colour. Adjacent ropes may share a colour.
@@ -35,14 +51,14 @@ brief and are the first things to playtest.
 
 ## The bar
 
-- Every `pushIntervalMs` the bar pushes all knots one row down and creates `knotsPerPush` new knots in
-  rows `0..spawnRows-1`. A progress bar above the board shows the next push coming (turns amber at 80%).
+- Every `pushIntervalMs` the bar pushes all knots one row down and creates `knotsPerGapPerPush` x gaps new knots in
+  rows `0..spawnRows-1` (the fraction is rolled). A progress bar above the board shows the next push coming (turns amber at 80%).
 - Knots in the last `board.dangerRows` rows glow and pulse, faster and brighter the lower they are.
 - **Game over** when any knot is pushed past the last row.
 
 ## Levels and stages
 
-- `levels[]` gives ropes, colours, push interval, knots per push and initial knots per level.
+- `levels[]` gives ropes, colours, push interval, knots per gap per push and initial knots per level.
 - **ASSUMPTION** `rules.stagesPerLevel = 3`; a stage clears when all ropes are gone. Each stage after the
   first multiplies the push interval by `rules.stageSpeedup` (0.88).
 - Past the last defined level, the last entry repeats with the interval scaled by
@@ -67,7 +83,7 @@ brief and are the first things to playtest.
 
 | Event | Points |
 |---|---|
-| Untwist | `untwist` (100) x chain, chain = consecutive untwists capped at `chainMax` (8); a twist resets it |
+| Untwist | `untwist` (100) x chain, chain = consecutive untwists inside `chainWindowMs`, capped at `chainMax` (8); a twist or a pause resets it |
 | Twist | minus `twistPenalty` (0) |
 | Rope cleared by untwisting | `ropeRemoved` (500) |
 | Rope burned by candle | `candleRope` (300) |
@@ -78,6 +94,7 @@ High score is kept in `localStorage` (wrapped in try/catch; private mode just lo
 ## Controls
 
 - **One-tap** (default): tap a gap, the frame jumps there and acts on the bottom knot.
+- Reading a knot: the strand with the white edge is on top. Top-right to bottom-left bright = right rope on top = BLUE.
 - **Two-tap** (`rules.twoTapMode`, also toggled on the menu): first tap moves, second tap on the same gap acts.
 - Tap zones are the full-height strips between rope centres; taps beyond the outer ropes snap to the outer gaps.
 - Desktop: arrows move, space acts, `F` spends a bonus flip, `C` connects the candle, Enter/space dismisses overlays.
@@ -92,8 +109,8 @@ High score is kept in `localStorage` (wrapped in try/catch; private mode just lo
 
 ## Tuning checklist for the first playtest
 
-1. Push interval at 1-1 (7 s) and the stage speed-up (0.88).
-2. `knotsPerPush` vs how fast a player clears; 2 at level 1.
+1. Push interval at 1-1 (4.5 s) and the stage speed-up (0.85).
+2. `knotsPerGapPerPush` (0.4 at level 1) vs how fast a player clears; `twistPushPenalty` (0.35).
 3. Twist mode: `addKnot` makes mistakes costly; `flipTop` is gentler.
 4. Power-up rates (12% / 4% / 4%).
 5. Chain cap and whether twists should cost points.
