@@ -19,7 +19,7 @@ export interface LevelDef {
 
 export const CONFIG = {
   title: 'Tanglefall',
-  version: '0.2.0',
+  version: '0.3.0',
 
   board: {
     rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game

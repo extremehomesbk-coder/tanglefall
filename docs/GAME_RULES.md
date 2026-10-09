@@ -4,6 +4,19 @@ Working title. Original mechanics-inspired puzzle; no third-party names, art, so
 Every number below lives in `src/config.ts`. Lines marked **ASSUMPTION** were not confirmed by the
 brief and are the first things to playtest.
 
+## v0.3 (2026-10-09): the leashes really braid
+Owner's verdict on v0.2: "a game for sure, although very boring". Research on the genre that sells on vertical video
+(Tangle Master 3D, Twisted Tangle, the dog-leash clones) says the hook is *watching* ropes physically untangle.
+v0.3 keeps every rule and changes what you see:
+- Ropes swap columns at each knot (a braid). Untwisting the bottom knot of a pair swings both leashes straight and
+  the two dogs under them trade places. A twist stacks a second crossing, which reads as a tighter wrap.
+- Each push slides the whole braid down a row and the new top knot re-threads the colours below it.
+- Rules unchanged: a rope is free when its column carries no crossing (= it runs straight to its dog); the frame still
+  acts on the bottom knot of a column pair; the same-colour rule and the brush use the two ropes that actually meet at
+  the knot (`Game.ropesAtKnot`), not the column owners.
+- Rendering: `src/view/BraidView.ts` draws every state change as a morph between two snapshots (`src/scenes/GameScene.ts`
+  `snapshotFrom`); the pure `computePerms` in `src/model/game.ts` gives the rope order at every row.
+
 ## v0.2 (2026-10-09): why it changed
 The first build played as "tap the green ones". v0.2 makes moves scarce and the clock real:
 - `rules.previewMode = 'off'`: no green/red outlines; the rope on top is the bright strand with a white edge,

@@ -105,8 +105,35 @@ describe('frame parity', () => {
     expect(g.drain().some((e) => e.type === 'chain')).toBe(true);
   });
 
+  it('braid: a crossing swaps the two ropes for every row below it', () => {
+    const g = fresh();
+    g.knots = [{ id: 1, left: g.ropes[1].id, right: g.ropes[2].id, top: 'left', row: 4, power: 'none' }];
+    const perms = g.perms();
+    expect(perms[4]).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(perms[5]).toEqual([0, 2, 1, 3, 4, 5]);
+    expect(perms[CONFIG.board.rows]).toEqual([0, 2, 1, 3, 4, 5]);
+    // a second crossing of the same pair below undoes the swap
+    g.knots.push({ id: 2, left: g.ropes[1].id, right: g.ropes[2].id, top: 'left', row: 7, power: 'none' });
+    expect(g.perms()[8]).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it('same-colour rule uses the ropes that actually meet at the knot', () => {
+    const g = fresh();
+    g.ropes.forEach((r, i) => (r.color = i)); // all distinct
+    // crossing at row 2 swaps ropes 0 and 1; at row 5 columns 1,2 hold ropes 0 and 2
+    g.knots = [
+      { id: 1, left: g.ropes[0].id, right: g.ropes[1].id, top: 'left', row: 2, power: 'none' },
+      { id: 2, left: g.ropes[1].id, right: g.ropes[2].id, top: 'left', row: 5, power: 'none' },
+    ];
+    const pair = g.ropesAtKnot(g.knots[1]);
+    expect(pair?.map((r) => r.id)).toEqual([g.ropes[0].id, g.ropes[2].id]);
+    g.ropes[0].color = g.ropes[2].color;
+    expect(g.wouldUntwist(g.knots[1], 'blue')).toBe(true);
+  });
+
   it('a bonus flips the frame without acting', () => {
     const g = fresh();
+    g.frameType = 'blue';
     g.bonuses = 1;
     expect(g.flipWithBonus()).toBe(true);
     expect(g.frameType).toBe('red');
@@ -172,6 +199,7 @@ describe('ropes and pushes', () => {
     g.ropes.forEach((r, i) => (r.color = i));
     g.knots = [{ id: 1, left: g.ropes[0].id, right: g.ropes[1].id, top: 'right', row: 3, power: 'none' }];
     g.bonuses = 2;
+    g.frameType = 'blue';
     g.moveFrame(0);
     g.drain();
     const before = g.score;

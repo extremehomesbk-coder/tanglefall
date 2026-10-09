@@ -20,7 +20,7 @@ src/config.ts         all tuning
 src/model/game.ts     pure rules: state, commands (moveFrame/act/flipWithBonus/push/tick/candleConnect), events
 src/model/game.test.ts
 src/scenes/           MenuScene (title, two-tap toggle), GameScene (plays model events as animations)
-src/view/             Layout (geometry), RopeView, KnotView, FrameView, Hud
+src/view/             Layout (geometry), BraidView (all leashes, morphs between snapshots), KnotView (overlays), FrameView, Hud
 docs/GAME_RULES.md    rules, tunables, assumptions
 ```
 The model never touches Phaser; the scene calls a command, drains `model.drain()` and animates each event.

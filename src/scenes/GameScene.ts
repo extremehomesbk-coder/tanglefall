@@ -1,17 +1,17 @@
 import Phaser from 'phaser';
+import { playBonus, playGameOver, playPush, playRopeClear, playTwist, playUntwist, unlockAudio } from '../audio';
 import { CONFIG } from '../config';
-import { Game } from '../model/game';
+import { computePerms, Game } from '../model/game';
 import type { GameEvent, Knot, Rope } from '../model/types';
 import { getHighScore, setHighScore } from '../storage';
-import { playBonus, playGameOver, playPush, playRopeClear, playTwist, playUntwist, unlockAudio } from '../audio';
+import { BraidView, type BraidSnapshot } from '../view/BraidView';
 import { FrameView } from '../view/FrameView';
 import { Hud } from '../view/Hud';
 import { KnotView } from '../view/KnotView';
 import { Layout } from '../view/layout';
-import { RopeView } from '../view/RopeView';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-const DOGS = ['\u{1F415}', '\u{1F429}', '\u{1F9AE}', '\u{1F415}\u200D\u{1F9BA}', '\u{1F436}', '\u{1F43A}'];
+const DOGS = ['\u{1F415}', '\u{1F429}', '\u{1F9AE}', '\u{1F415}‍\u{1F9BA}', '\u{1F436}', '\u{1F43A}'];
 
 export interface GameSceneData {
   twoTap?: boolean;
@@ -20,7 +20,7 @@ export interface GameSceneData {
 export class GameScene extends Phaser.Scene {
   private model!: Game;
   private layout!: Layout;
-  private ropeViews = new Map<number, RopeView>();
+  private braid!: BraidView;
   private dogViews = new Map<number, Phaser.GameObjects.Text>();
   private knotViews = new Map<number, KnotView>();
   private frame!: FrameView;
@@ -34,6 +34,8 @@ export class GameScene extends Phaser.Scene {
   private pushTimer = 0;
   private twoTap = false;
   private best = 0;
+  private ropesBefore: Rope[] = [];
+  private pendingTransition: Phaser.Time.TimerEvent | null = null;
 
   constructor() {
     super('game');
@@ -44,7 +46,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.ropeViews.clear();
     this.dogViews.clear();
     this.knotViews.clear();
     this.overlay = null;
@@ -55,8 +56,10 @@ export class GameScene extends Phaser.Scene {
     this.model.startStage(1, 1);
     this.model.drain();
     this.layout = new Layout();
+    this.layout.setRopeCount(this.model.ropes.length);
 
     this.drawBoard();
+    this.braid = new BraidView(this, this.layout, this.snapshot()).setDepth(10);
     this.hud = new Hud(this);
     this.hud.setBest(this.best);
     this.frame = new FrameView(this, this.layout.spacing, this.layout.rowH).setDepth(20);
@@ -93,12 +96,10 @@ export class GameScene extends Phaser.Scene {
     g.fillRoundedRect(8, L.boardTop - 4, L.width - 16, L.boardHeight + 8, 16);
     g.lineStyle(2, CONFIG.colors.boardEdge, 1);
     g.strokeRoundedRect(8, L.boardTop - 4, L.width - 16, L.boardHeight + 8, 16);
-    // danger zone
     g.fillStyle(CONFIG.colors.danger, 0.06);
     g.fillRect(10, L.dangerY(), L.width - 20, L.boardBottom - L.dangerY());
     g.lineStyle(1, CONFIG.colors.danger, 0.35);
     for (let x = 14; x < L.width - 14; x += 12) g.lineBetween(x, L.dangerY(), x + 6, L.dangerY());
-    // bottom edge = the floor knots must not reach
     g.lineStyle(3, CONFIG.colors.danger, 0.5);
     g.lineBetween(12, L.boardBottom + 2, L.width - 12, L.boardBottom + 2);
 
@@ -128,20 +129,60 @@ export class GameScene extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.ADD);
   }
 
+  // ---------- snapshots: model -> braid picture ----------
+
+  private snapshotFrom(ropes: readonly Rope[], knots: readonly Knot[]): BraidSnapshot {
+    const rows = CONFIG.board.rows;
+    const n = ropes.length;
+    const perms = computePerms(ropes, knots, rows);
+    const paths = new Map<number, number[]>();
+    const colors = new Map<number, number>();
+    for (const rope of ropes) {
+      paths.set(rope.id, []);
+      colors.set(rope.id, rope.color);
+    }
+    for (let r = 0; r <= rows; r++) {
+      for (let col = 0; col < n; col++) paths.get(ropes[perms[r][col]].id)?.push(this.layout.colX(col, n));
+    }
+    const crossings = [];
+    for (const k of knots) {
+      const c = ropes.findIndex((rope) => rope.id === k.left);
+      const row = perms[k.row];
+      if (c < 0 || c + 1 >= n || !row) continue;
+      const fromLeft = ropes[row[c]];
+      const fromRight = ropes[row[c + 1]];
+      const top = k.top === 'left' ? fromLeft : fromRight;
+      const under = top === fromLeft ? fromRight : fromLeft;
+      crossings.push({ row: k.row, col: c, topRope: top.id, underRope: under.id });
+    }
+    return { paths, colors, crossings };
+  }
+
+  private snapshot(): BraidSnapshot {
+    return this.snapshotFrom(this.model.ropes, this.model.knots);
+  }
+
+  private transition(snap: BraidSnapshot, ms: number, shiftDown = false): void {
+    this.tweens.killTweensOf(this.braid);
+    this.braid.setTarget(snap, shiftDown);
+    if (shiftDown) {
+      this.braid.pushOffset = -this.layout.rowH;
+      this.tweens.add({ targets: this.braid, pushOffset: 0, duration: ms, ease: 'Quad.easeOut' });
+    }
+    this.tweens.add({ targets: this.braid, t: 1, duration: ms, ease: 'Quad.easeInOut' });
+  }
+
   // ---------- views from model ----------
 
   private buildStageViews(): void {
-    for (const v of this.ropeViews.values()) v.destroy();
     for (const v of this.dogViews.values()) v.destroy();
     for (const v of this.knotViews.values()) v.destroy();
-    this.ropeViews.clear();
     this.dogViews.clear();
     this.knotViews.clear();
     const m = this.model;
     this.layout.setRopeCount(m.ropes.length);
     this.frame.resize(this.layout.spacing, this.layout.rowH);
-    const n = m.ropes.length;
-    m.ropes.forEach((rope, i) => this.makeRopeView(rope, this.layout.colX(i, n)));
+    for (const rope of m.ropes) this.makeDog(rope);
     for (const knot of m.knots) this.makeKnotView(knot, false);
     this.hud.setLevel(m.level, m.stage);
     this.hud.setScore(m.score);
@@ -154,32 +195,19 @@ export class GameScene extends Phaser.Scene {
     this.refreshPreview();
   }
 
-  private makeRopeView(rope: Rope, x: number): RopeView {
-    const v = new RopeView(this, x, this.layout.boardTop + 4, this.layout.boardBottom - 4, rope.color).setDepth(10);
-    this.ropeViews.set(rope.id, v);
+  private makeDog(rope: Rope): void {
     const dog = this.add
-      .text(x, this.layout.boardBottom + 20, DOGS[rope.id % DOGS.length], { fontSize: '24px' })
+      .text(0, this.layout.boardBottom + 20, DOGS[rope.id % DOGS.length], { fontSize: '24px' })
       .setOrigin(0.5)
       .setDepth(11);
-    this.tweens.add({ targets: dog, y: dog.y - 3, duration: 500 + (rope.id % 5) * 90, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     this.dogViews.set(rope.id, dog);
-    return v;
   }
 
   private makeKnotView(knot: Knot, pop: boolean): KnotView {
     const m = this.model;
     const n = m.ropes.length;
     const gap = m.gapOf(knot);
-    const v = new KnotView(
-      this,
-      this.layout.gapX(gap, n),
-      this.layout.rowY(knot.row),
-      knot,
-      this.layout.spacing,
-      this.layout.rowH,
-      m.ropeById(knot.left)?.color ?? 0,
-      m.ropeById(knot.right)?.color ?? 0,
-    ).setDepth(15);
+    const v = new KnotView(this, this.layout.gapX(gap, n), this.layout.rowY(knot.row), knot, this.layout.spacing, this.layout.rowH).setDepth(15);
     this.knotViews.set(knot.id, v);
     if (pop) {
       v.setScale(0);
@@ -204,7 +232,6 @@ export class GameScene extends Phaser.Scene {
     else this.frame.setPosition(x, y);
   }
 
-  /** Green/red outline on the bottom-most knot of every gap for the current frame type (previewMode 'all'). */
   private refreshPreview(): void {
     const m = this.model;
     if (CONFIG.rules.previewMode === 'off') {
@@ -212,27 +239,21 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const bottoms = new Set<number>();
+    const perms = m.perms();
     for (let g = 0; g < m.gapCount; g++) {
       const k = m.bottomKnot(g);
       if (!k) continue;
       bottoms.add(k.id);
-      this.knotViews.get(k.id)?.setPreview(m.wouldUntwist(k) ? 'good' : 'bad');
+      this.knotViews.get(k.id)?.setPreview(m.wouldUntwist(k, m.frameType, perms) ? 'good' : 'bad');
     }
     for (const [id, v] of this.knotViews) if (!bottoms.has(id)) v.setPreview('none');
   }
 
+  /** Columns changed (a rope left): slide knot overlays, frame and markers; the braid morphs on its own. */
   private relayout(): void {
     const m = this.model;
     const n = m.ropes.length;
     const ms = CONFIG.anim.slideMs;
-    m.ropes.forEach((rope, i) => {
-      const v = this.ropeViews.get(rope.id);
-      if (!v) return;
-      this.tweens.killTweensOf(v);
-      this.tweens.add({ targets: v, x: this.layout.colX(i, n), duration: ms, ease: 'Quad.easeInOut' });
-      const dog = this.dogViews.get(rope.id);
-      if (dog) this.tweens.add({ targets: dog, x: this.layout.colX(i, n), duration: ms, ease: 'Quad.easeInOut' });
-    });
     for (const knot of m.knots) {
       const v = this.knotViews.get(knot.id);
       if (!v) continue;
@@ -291,9 +312,9 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** Run a model command, then play every event it produced. */
   private run(cmd: () => void): void {
     if (this.model.status !== 'playing') return;
+    this.ropesBefore = this.model.ropes.slice();
     cmd();
     this.handle(this.model.drain());
   }
@@ -301,7 +322,29 @@ export class GameScene extends Phaser.Scene {
   // ---------- event playback ----------
 
   private handle(events: GameEvent[]): void {
-    for (const e of events) this.handleOne(e);
+    const removed = events.filter((e) => e.type === 'ropeRemoved');
+    let braidDone = false;
+    for (const e of events) {
+      if (e.type === 'untwist' && removed.length > 0) {
+        // 1) show the last knot opening with the rope still there, 2) then let it leave
+        const knots = [...this.model.knots, ...removed.flatMap((r) => (r.type === 'ropeRemoved' ? r.knots : []))].filter(
+          (k) => k.id !== e.knot.id,
+        );
+        this.transition(this.snapshotFrom(this.ropesBefore, knots), CONFIG.anim.untwistMs);
+        this.pendingTransition?.remove(false);
+        this.pendingTransition = this.time.delayedCall(CONFIG.anim.untwistMs + 120, () => {
+          this.transition(this.snapshot(), CONFIG.anim.ropeRemoveMs);
+          this.relayout();
+        });
+        braidDone = true;
+      }
+      this.handleOne(e);
+    }
+    if (!braidDone && events.some((e) => e.type !== 'frameMoved' && e.type !== 'frameFlipped' && e.type !== 'chain' && e.type !== 'noKnot' && e.type !== 'bonus')) {
+      const push = events.some((e) => e.type === 'push');
+      this.transition(this.snapshot(), push ? CONFIG.anim.pushMs : CONFIG.anim.untwistMs, push);
+      if (removed.length > 0) this.relayout();
+    }
     this.hud.setScore(this.model.score);
     this.hud.setChain(this.model.chain);
     this.hud.setReady(this.model.readyCount(), this.model.bonuses);
@@ -329,7 +372,7 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'twist': {
         const v = this.knotViews.get(e.knot.id);
-        if (v) this.animateTwist(v, e.knot);
+        if (v) this.animateTwist(v);
         if (e.added) {
           const nv = this.makeKnotView(e.added, true);
           nv.setY(this.layout.rowY(e.knot.row));
@@ -338,7 +381,6 @@ export class GameScene extends Phaser.Scene {
         this.floatText(this.layout.gapX(m.gapOf(e.knot), n), this.layout.rowY(e.knot.row) - 20, 'TIGHTER!', '#ff6b6b');
         this.cameras.main.shake(90, 0.004);
         playTwist();
-        // mistakes hurry the bar along
         this.pushTimer = Math.min(m.pushIntervalMs - 60, this.pushTimer + m.pushIntervalMs * CONFIG.rules.twistPushPenalty);
         this.tweens.add({ targets: this.pushStamp, alpha: { from: 1, to: 0 }, duration: 250 });
         break;
@@ -347,24 +389,32 @@ export class GameScene extends Phaser.Scene {
         this.shake(this.frame);
         break;
       case 'ropeRemoved': {
-        const v = this.ropeViews.get(e.rope.id);
-        if (v) this.animateRopeRemove(v, e.rope);
-        this.ropeViews.delete(e.rope.id);
         const dog = this.dogViews.get(e.rope.id);
         if (dog) {
           this.dogViews.delete(e.rope.id);
           this.tweens.killTweensOf(dog);
           const dir = dog.x < this.layout.centerX ? -1 : 1;
           dog.setFlipX(dir > 0);
-          this.tweens.add({ targets: dog, x: dog.x + dir * 260, y: dog.y - 20, angle: dir * 25, duration: 600, ease: 'Quad.easeIn', onComplete: () => dog.destroy() });
+          this.tweens.add({ targets: dog, scale: 1.5, duration: 160, yoyo: true });
+          this.tweens.add({
+            targets: dog,
+            x: dog.x + dir * 260,
+            y: dog.y - 20,
+            angle: dir * 25,
+            delay: CONFIG.anim.untwistMs,
+            duration: 600,
+            ease: 'Quad.easeIn',
+            onComplete: () => dog.destroy(),
+          });
         }
-        playRopeClear();
-        if (e.cause === 'untwist' && CONFIG.rules.ropeClearResetsPush) this.pushTimer = 0;
         for (const k of e.knots) {
           const kv = this.knotViews.get(k.id);
           if (kv) this.tweens.add({ targets: kv, scale: 0, alpha: 0, duration: 200, onComplete: () => kv.destroy() });
           this.knotViews.delete(k.id);
         }
+        this.time.delayedCall(CONFIG.anim.untwistMs, () => this.ropeFlash(e.rope));
+        playRopeClear();
+        if (e.cause === 'untwist' && CONFIG.rules.ropeClearResetsPush) this.pushTimer = 0;
         this.floatText(
           this.layout.centerX,
           this.layout.boardTop + 60,
@@ -372,7 +422,6 @@ export class GameScene extends Phaser.Scene {
           '#ffd166',
           22,
         );
-        this.time.delayedCall(CONFIG.anim.ropeRemoveMs * 0.6, () => this.relayout());
         break;
       }
       case 'frameMoved':
@@ -399,23 +448,11 @@ export class GameScene extends Phaser.Scene {
         if (e.success) this.cameras.main.flash(180, 255, 140, 60);
         break;
       case 'brush':
-        for (const id of e.ropeIds) {
-          const rope = m.ropeById(id);
-          const v = this.ropeViews.get(id);
-          if (rope && v) {
-            v.redraw(rope.color);
-            this.tweens.add({ targets: v, alpha: { from: 0.2, to: 1 }, duration: 350 });
-          }
-        }
-        for (const knot of m.knots) {
-          if (e.ropeIds.includes(knot.left) || e.ropeIds.includes(knot.right)) {
-            this.knotViews.get(knot.id)?.redraw(m.ropeById(knot.left)?.color ?? 0, m.ropeById(knot.right)?.color ?? 0);
-          }
-        }
+        this.cameras.main.flash(120, 255, 255, 255);
         this.floatText(this.frame.x, this.frame.y - 24, 'PAINTED', '#ffffff');
         break;
       case 'stageClear':
-        this.time.delayedCall(650, () => this.showOverlay('stageClear', e.bonusPoints));
+        this.time.delayedCall(900, () => this.showOverlay('stageClear', e.bonusPoints));
         break;
       case 'gameOver':
         if (m.score > getHighScore()) setHighScore(m.score);
@@ -431,22 +468,10 @@ export class GameScene extends Phaser.Scene {
   // ---------- animations ----------
 
   private animateUntwist(v: KnotView, knot: Knot, points: number, chain: number): void {
-    const dir = knot.top === 'left' ? -1 : 1;
     v.setPreview('none');
     v.glow.setAlpha(0);
-    this.tweens.add({
-      targets: v,
-      angle: dir * 180,
-      scaleX: 0.05,
-      scaleY: 1.3,
-      alpha: 0,
-      duration: CONFIG.anim.untwistMs,
-      ease: 'Cubic.easeIn',
-      onComplete: () => v.destroy(),
-    });
+    this.tweens.add({ targets: v, scale: 1.6, alpha: 0, duration: CONFIG.anim.untwistMs, ease: 'Quad.easeOut', onComplete: () => v.destroy() });
     this.burst(v.x, v.y, 8, 0xffffff);
-    this.wiggle(knot.left);
-    this.wiggle(knot.right);
     for (const id of [knot.left, knot.right]) {
       const dog = this.dogViews.get(id);
       if (dog) this.tweens.add({ targets: dog, scale: { from: 1.35, to: 1 }, duration: 220, ease: 'Back.easeOut' });
@@ -454,29 +479,27 @@ export class GameScene extends Phaser.Scene {
     this.floatText(v.x, v.y - 16, chain > 1 ? `+${points}  x${chain}` : `+${points}`, '#9dffb0', 14 + Math.min(chain, 8) * 2);
   }
 
-  private animateTwist(v: KnotView, knot: Knot): void {
-    v.redraw(this.model.ropeById(knot.left)?.color ?? 0, this.model.ropeById(knot.right)?.color ?? 0);
+  private animateTwist(v: KnotView): void {
     const flash = this.add.circle(v.x, v.y, this.layout.spacing * 0.6, 0xff3b3b, 0.55).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
     this.tweens.add({ targets: flash, scale: 1.6, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
     this.tweens.add({ targets: v, scale: 1.35, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
-    this.tweens.add({ targets: v, x: v.x + 4, duration: 40, yoyo: true, repeat: 3 });
   }
 
-  private animateRopeRemove(v: RopeView, rope: Rope): void {
+  private ropeFlash(rope: Rope): void {
     const L = this.layout;
-    this.tweens.killTweensOf(v);
+    const x = this.braid.bottomX(rope.id) ?? L.centerX;
     const color = CONFIG.colors.palette[rope.color % CONFIG.colors.palette.length];
     const flash = this.add
-      .rectangle(v.x, (L.boardTop + L.boardBottom) / 2, 18, L.boardHeight, 0xffffff, 0.8)
+      .rectangle(x, (L.boardTop + L.boardBottom) / 2, 18, L.boardHeight, 0xffffff, 0.8)
       .setDepth(12)
       .setBlendMode(Phaser.BlendModes.ADD);
     this.tweens.add({ targets: flash, scaleX: 3, alpha: 0, duration: 320, onComplete: () => flash.destroy() });
     for (let i = 0; i < 14; i++) {
       const y = L.boardTop + (i + 0.5) * (L.boardHeight / 14);
-      const bead = this.add.circle(v.x, y, CONFIG.layout.beadRadius, color, 1).setDepth(13);
+      const bead = this.add.circle(x, y, CONFIG.layout.beadRadius, color, 1).setDepth(13);
       this.tweens.add({
         targets: bead,
-        x: v.x + Phaser.Math.Between(-70, 70),
+        x: x + Phaser.Math.Between(-70, 70),
         y: y - Phaser.Math.Between(40, 140),
         alpha: 0,
         scale: 0.3,
@@ -485,7 +508,6 @@ export class GameScene extends Phaser.Scene {
         onComplete: () => bead.destroy(),
       });
     }
-    this.tweens.add({ targets: v, alpha: 0, scaleY: 0.2, duration: CONFIG.anim.ropeRemoveMs * 0.5, onComplete: () => v.destroy() });
     this.cameras.main.shake(140, 0.006);
   }
 
@@ -496,35 +518,18 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: this.pushStamp, y: L.boardTop + L.rowH * 0.8, duration: CONFIG.anim.pushMs * 0.5, yoyo: true, ease: 'Quad.easeOut', onComplete: () => this.pushStamp.setAlpha(0) });
     for (const knot of m.knots) {
       const v = this.knotViews.get(knot.id);
-      if (!v) continue;
-      if (spawned.includes(knot)) continue;
+      if (!v || spawned.includes(knot)) continue;
       this.tweens.add({ targets: v, y: L.rowY(knot.row), duration: CONFIG.anim.pushMs, ease: 'Quad.easeOut' });
     }
     for (const knot of spawned) this.makeKnotView(knot, true);
     this.cameras.main.shake(70, 0.002);
   }
 
-  private wiggle(ropeId: number): void {
-    const v = this.ropeViews.get(ropeId);
-    if (!v) return;
-    const x0 = v.x;
-    this.tweens.killTweensOf(v);
-    this.tweens.add({ targets: v, x: x0 + 5, duration: 45, yoyo: true, repeat: 3, onComplete: () => v.setX(x0) });
-  }
-
   private burst(x: number, y: number, count: number, color: number): void {
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
       const p = this.add.circle(x, y, 3, color, 1).setDepth(18);
-      this.tweens.add({
-        targets: p,
-        x: x + Math.cos(a) * 34,
-        y: y + Math.sin(a) * 34,
-        alpha: 0,
-        duration: 300,
-        ease: 'Quad.easeOut',
-        onComplete: () => p.destroy(),
-      });
+      this.tweens.add({ targets: p, x: x + Math.cos(a) * 34, y: y + Math.sin(a) * 34, alpha: 0, duration: 300, ease: 'Quad.easeOut', onComplete: () => p.destroy() });
     }
   }
 
@@ -566,17 +571,16 @@ export class GameScene extends Phaser.Scene {
     const m = this.model;
     const c = this.add.container(0, 0).setDepth(100);
     const bg = this.add.rectangle(L.width / 2, L.height / 2, L.width, L.height, 0x000000, 0.72);
-    const title = kind === 'stageClear' ? `STAGE ${m.level}-${m.stage} CLEAR` : 'TANGLED!';
+    const title = kind === 'stageClear' ? `ALL DOGS HOME  ${m.level}-${m.stage}` : 'TANGLED!';
     const t1 = this.add
-      .text(L.width / 2, L.height / 2 - 70, title, { fontFamily: FONT, fontSize: '34px', color: CONFIG.colors.text, fontStyle: 'bold' })
+      .text(L.width / 2, L.height / 2 - 70, title, { fontFamily: FONT, fontSize: '30px', color: CONFIG.colors.text, fontStyle: 'bold' })
       .setOrigin(0.5);
-    const line2 =
-      kind === 'stageClear' ? `+${bonusPoints} stage bonus` : `Score ${m.score}   Best ${Math.max(this.best, m.score)}`;
+    const line2 = kind === 'stageClear' ? `+${bonusPoints} stage bonus` : `Score ${m.score}   Best ${Math.max(this.best, m.score)}`;
     const t2 = this.add
       .text(L.width / 2, L.height / 2 - 20, line2, { fontFamily: FONT, fontSize: '18px', color: CONFIG.colors.textDim })
       .setOrigin(0.5);
     const t3 = this.add
-      .text(L.width / 2, L.height / 2 + 40, kind === 'stageClear' ? 'TAP FOR NEXT STAGE' : 'TAP TO PLAY AGAIN', {
+      .text(L.width / 2, L.height / 2 + 40, kind === 'stageClear' ? 'TAP FOR THE NEXT WALK' : 'TAP TO PLAY AGAIN', {
         fontFamily: FONT,
         fontSize: '20px',
         color: CONFIG.colors.text,
@@ -598,22 +602,15 @@ export class GameScene extends Phaser.Scene {
       this.model.nextStage();
       this.model.drain();
       this.pushTimer = 0;
+      this.layout.setRopeCount(this.model.ropes.length);
+      this.braid.setTarget(this.snapshot());
+      this.braid.t = 1;
       this.buildStageViews();
       this.placeCandleMarkers();
       this.getReady();
       return;
     }
-    if (CONFIG.rules.restartFromLevelOne) {
-      this.scene.restart({ twoTap: this.twoTap });
-      return;
-    }
-    this.model.startStage(this.model.level, 1);
-    this.model.drain();
-    this.model.score = 0;
-    this.model.bonuses = 0;
-    this.pushTimer = 0;
-    this.buildStageViews();
-    this.placeCandleMarkers();
+    this.scene.restart({ twoTap: this.twoTap });
   }
 
   // ---------- frame loop ----------
@@ -626,23 +623,26 @@ export class GameScene extends Phaser.Scene {
       const interval = m.pushIntervalMs;
       if (this.pushTimer >= interval) {
         this.pushTimer = 0;
+        this.ropesBefore = m.ropes.slice();
         m.push();
         this.handle(m.drain());
       }
       m.tick(delta);
       const evs = m.drain();
       if (evs.length) this.handle(evs);
-      // push progress bar
       const frac = Math.min(1, this.pushTimer / interval);
       this.pushBar.clear();
       this.pushBar.fillStyle(0x2a2e3f, 1);
       this.pushBar.fillRoundedRect(12, L.boardTop - 8, L.width - 24, 6, 3);
-      const urgent = frac > 0.8;
-      this.pushBar.fillStyle(urgent ? 0xffb42e : CONFIG.colors.bar, 1);
+      this.pushBar.fillStyle(frac > 0.8 ? 0xffb42e : CONFIG.colors.bar, 1);
       this.pushBar.fillRoundedRect(12, L.boardTop - 8, Math.max(6, (L.width - 24) * frac), 6, 3);
       this.hud.setCandle(m.candle ? m.candle.msLeft / m.candle.msTotal : null);
     }
-    // danger pulse: lower knots pulse faster and brighter
+    if (this.braid.animating || this.braid.dirty) this.braid.draw();
+    for (const [id, dog] of this.dogViews) {
+      const x = this.braid.bottomX(id);
+      if (x !== undefined) dog.setX(x);
+    }
     const dangerStart = CONFIG.board.rows - CONFIG.board.dangerRows;
     for (const v of this.knotViews.values()) {
       const k = v.knot;
@@ -650,10 +650,9 @@ export class GameScene extends Phaser.Scene {
         v.glow.setAlpha(0);
         continue;
       }
-      const depth = (k.row - dangerStart + 1) / CONFIG.board.dangerRows; // 0..1
+      const depth = (k.row - dangerStart + 1) / CONFIG.board.dangerRows;
       const speed = 0.004 + depth * 0.008;
-      const a = 0.25 + depth * 0.35 + Math.sin(time * speed) * 0.2;
-      v.glow.setAlpha(Math.max(0, a));
+      v.glow.setAlpha(Math.max(0, 0.25 + depth * 0.35 + Math.sin(time * speed) * 0.2));
       v.glow.setScale(1 + Math.sin(time * speed) * 0.15 * depth);
     }
     if (m.candle) {

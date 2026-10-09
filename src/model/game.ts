@@ -13,6 +13,35 @@ export type Status = 'playing' | 'stageClear' | 'gameOver';
 
 const other = (t: TopSide): TopSide => (t === 'left' ? 'right' : 'left');
 
+/**
+ * Braid permutations: ropes swap columns at every crossing. Result[r] holds, per column, the index into `ropes`
+ * of the rope at the TOP of row r; result[rows] is the order at the floor. Pure, so the view can run it on
+ * an older rope/knot list to animate an intermediate state.
+ */
+export function computePerms(ropes: readonly Rope[], knots: readonly Knot[], rows: number): number[][] {
+  const n = ropes.length;
+  const out: number[][] = [];
+  let cur = Array.from({ length: n }, (_, i) => i);
+  const byRow = new Map<number, Knot[]>();
+  for (const k of knots) {
+    const list = byRow.get(k.row) ?? [];
+    list.push(k);
+    byRow.set(k.row, list);
+  }
+  for (let r = 0; r <= rows; r++) {
+    out.push(cur);
+    const next = cur.slice();
+    for (const k of byRow.get(r) ?? []) {
+      const c = ropes.findIndex((rope) => rope.id === k.left);
+      if (c < 0 || c + 1 >= n) continue;
+      next[c] = cur[c + 1];
+      next[c + 1] = cur[c];
+    }
+    cur = next;
+  }
+  return out;
+}
+
 /** Pure game state + rules. No rendering, no timers: the scene calls push()/tick() itself. */
 export class Game {
   ropes: Rope[] = [];
@@ -95,10 +124,9 @@ export class Game {
     return this.knots.filter((k) => k.left === id || k.right === id);
   }
 
-  wouldUntwist(knot: Knot, frame: FrameType = this.frameType): boolean {
-    const l = this.ropeById(knot.left);
-    const r = this.ropeById(knot.right);
-    if (l && r && l.color === r.color) return true;
+  wouldUntwist(knot: Knot, frame: FrameType = this.frameType, perms?: number[][]): boolean {
+    const pair = this.ropesAtKnot(knot, perms);
+    if (pair && pair[0].color === pair[1].color) return true;
     return frame === 'blue' ? knot.top === 'right' : knot.top === 'left';
   }
 
@@ -120,12 +148,29 @@ export class Game {
     return this.candle !== null && this.ropeIndex(this.candle.ropeId) === this.candle.targetIndex;
   }
 
+  /**
+   * Braid view of the board: ropes swap columns at every crossing. perms[r] is the rope index (into `ropes`)
+   * sitting in each column at the TOP of row r; perms[rows] is the order at the floor, where the dogs sit.
+   */
+  perms(): number[][] {
+    return computePerms(this.ropes, this.knots, this.cfg.board.rows);
+  }
+
+  /** The two ropes that actually meet at a knot (after the swaps above it): [from the left, from the right]. */
+  ropesAtKnot(knot: Knot, perms = this.perms()): [Rope, Rope] | null {
+    const c = this.gapOf(knot);
+    const row = perms[knot.row];
+    if (!row || c < 0 || c + 1 >= row.length) return null;
+    return [this.ropes[row[c]], this.ropes[row[c + 1]]];
+  }
+
   /** How many gaps' bottom knots the current frame would untwist. 0 = stuck: twist, or spend a bonus. */
   readyCount(): number {
     let n = 0;
+    const perms = this.perms();
     for (let g = 0; g < this.gapCount; g++) {
       const k = this.bottomKnot(g);
-      if (k && this.wouldUntwist(k)) n++;
+      if (k && this.wouldUntwist(k, this.frameType, perms)) n++;
     }
     return n;
   }
@@ -348,9 +393,13 @@ export class Game {
   }
 
   private applyBrush(knot: Knot): void {
-    const l = this.ropeById(knot.left);
-    const r = this.ropeById(knot.right);
-    if (!l || !r) return;
+    // the knot is already gone, so look at the ropes that now run through its gap at that row
+    const perms = this.perms();
+    const c = this.gapOf(knot);
+    const row = perms[knot.row];
+    if (!row || c < 0 || c + 1 >= row.length) return;
+    const l = this.ropes[row[c]];
+    const r = this.ropes[row[c + 1]];
     if (this.cfg.powerUps.brushMode === 'match') {
       r.color = l.color;
     } else {
