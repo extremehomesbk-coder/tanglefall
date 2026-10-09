@@ -37,11 +37,14 @@ def main() -> None:
         url += ("&" if "?" in url else "?") + f"seed={seed}"
     if "hd=" not in url:
         url += "&hd=2"  # 2x canvas so the 1080x1920 frame is crisp
+    if "canvas=" not in url:
+        url += "&canvas=1"  # software-friendly renderer; WebGL in headless Chromium runs at a few fps
+    headed = os.environ.get("CLIP_HEADED") == "1"
     CLIPS.mkdir(exist_ok=True)
     lead_in = 1.6  # seconds of page load + "UNTANGLE!" splash to trim away
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(headless=not headed, args=["--disable-gpu-vsync", "--disable-frame-rate-limit"])
         # the video frame must equal the viewport, or Playwright pads the page into a grey corner
         ctx = browser.new_context(
             viewport={"width": 1080, "height": 1920},
@@ -52,6 +55,7 @@ def main() -> None:
             record_video_size={"width": 1080, "height": 1920},
         )
         page = ctx.new_page()
+        page.on("console", lambda msg: print(msg.text) if msg.text.startswith("[demo]") else None)
         page.goto(url, wait_until="load")
         page.wait_for_timeout(int((lead_in + seconds + 0.5) * 1000))
         video = page.video

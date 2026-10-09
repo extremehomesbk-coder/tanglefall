@@ -4,8 +4,11 @@ import { GameScene } from './scenes/GameScene';
 import { MenuScene } from './scenes/MenuScene';
 import { HD } from './hd';
 
+// ?canvas=1 forces the Canvas renderer (headless recorders have no GPU; WebGL there crawls)
+const CANVAS = new URLSearchParams(window.location.search).has('canvas');
+
 new Phaser.Game({
-  type: Phaser.AUTO,
+  type: CANVAS ? Phaser.CANVAS : Phaser.AUTO,
   parent: 'app',
   backgroundColor: CONFIG.colors.background,
   scale: {

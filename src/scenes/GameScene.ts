@@ -40,6 +40,7 @@ export class GameScene extends Phaser.Scene {
   private pendingTransition: Phaser.Time.TimerEvent | null = null;
   private auto = false;
   private autoTimer = 0;
+  private fpsTimer = 0;
 
   constructor() {
     super('game');
@@ -744,6 +745,11 @@ export class GameScene extends Phaser.Scene {
       if (this.autoTimer >= AUTO_EVERY_MS) {
         this.autoTimer = 0;
         this.autoStep();
+      }
+      this.fpsTimer += delta;
+      if (this.fpsTimer >= 1000) {
+        this.fpsTimer = 0;
+        console.info(`[demo] fps=${this.game.loop.actualFps.toFixed(1)} walk=${(m.walkMsLeft / 1000).toFixed(1)}s score=${m.score}`);
       }
     }
     if (this.braid.animating || this.braid.dirty) this.braid.draw();

@@ -37,7 +37,7 @@ export const CONFIG = {
   board: {
     rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game
     dangerRows: 4, // rows from the bottom where knots glow and pulse
-    startRowsFraction: 1 / 3, // initial knots are bunched in the top third
+    startRowsFraction: 0.45, // initial knots are bunched in the top part of the board
     spawnRows: 2, // knots created by a push land in rows 0..spawnRows-1
   },
 
@@ -70,12 +70,12 @@ export const CONFIG = {
   ] as BreedDef[],
 
   levels: [
-    { ropes: 6, colors: 3, pushIntervalMs: 4500, knotsPerGapPerPush: 0.4, initialKnots: 9, walkMs: 60000, dogsToFree: 4 },
-    { ropes: 7, colors: 4, pushIntervalMs: 4200, knotsPerGapPerPush: 0.45, initialKnots: 11, walkMs: 60000, dogsToFree: 5 },
-    { ropes: 7, colors: 4, pushIntervalMs: 3800, knotsPerGapPerPush: 0.5, initialKnots: 13, walkMs: 60000, dogsToFree: 6 },
-    { ropes: 8, colors: 5, pushIntervalMs: 3500, knotsPerGapPerPush: 0.5, initialKnots: 15, walkMs: 65000, dogsToFree: 6 },
-    { ropes: 8, colors: 6, pushIntervalMs: 3200, knotsPerGapPerPush: 0.55, initialKnots: 17, walkMs: 65000, dogsToFree: 7 },
-    { ropes: 9, colors: 7, pushIntervalMs: 3000, knotsPerGapPerPush: 0.6, initialKnots: 19, walkMs: 70000, dogsToFree: 8 },
+    { ropes: 6, colors: 3, pushIntervalMs: 4000, knotsPerGapPerPush: 0.45, initialKnots: 16, walkMs: 45000, dogsToFree: 5 },
+    { ropes: 7, colors: 4, pushIntervalMs: 3800, knotsPerGapPerPush: 0.5, initialKnots: 19, walkMs: 50000, dogsToFree: 6 },
+    { ropes: 7, colors: 4, pushIntervalMs: 3500, knotsPerGapPerPush: 0.55, initialKnots: 21, walkMs: 50000, dogsToFree: 7 },
+    { ropes: 8, colors: 5, pushIntervalMs: 3300, knotsPerGapPerPush: 0.55, initialKnots: 24, walkMs: 55000, dogsToFree: 7 },
+    { ropes: 8, colors: 6, pushIntervalMs: 3100, knotsPerGapPerPush: 0.6, initialKnots: 26, walkMs: 55000, dogsToFree: 8 },
+    { ropes: 9, colors: 7, pushIntervalMs: 2900, knotsPerGapPerPush: 0.65, initialKnots: 30, walkMs: 60000, dogsToFree: 9 },
   ] as LevelDef[],
   beyondLastLevel: { pushIntervalFactor: 0.92, minPushIntervalMs: 1500 },
 
