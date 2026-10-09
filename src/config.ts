@@ -10,16 +10,29 @@ export type PreviewMode = 'off' | 'all';
 export type Orientation = 'alternate' | 'random';
 
 export interface LevelDef {
-  ropes: number; // ropes hanging at stage start
+  ropes: number; // dogs (ropes) at walk start
   colors: number; // how many palette colours are in play
   pushIntervalMs: number; // bar push interval at stage 1 of this level
   knotsPerGapPerPush: number; // new knots per push = this x gaps (fraction rolled), so fewer ropes = fewer knots
   initialKnots: number; // knots at stage start (every rope gets at least one)
+  walkMs: number; // walk length; the walk fails when it runs out
+  dogsToFree: number; // dogs that must get home to finish the walk
+}
+
+/** A dog's personality: what its leash does to the board. */
+export interface BreedDef {
+  name: string;
+  emoji: string;
+  tangleWeight: number; // how often new knots land on its leash (1 = normal)
+  pointsMul: number; // untwists on its leash score x this
+  pushFactor: number; // push interval x this while the dog is still on the board
+  freeBonusMs: number; // walk time added when the dog gets home
+  cascade: boolean; // freeing it also unties the bottom knot of both neighbouring gaps
 }
 
 export const CONFIG = {
   title: 'Tanglefall',
-  version: '0.3.0',
+  version: '0.4.0',
 
   board: {
     rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game
@@ -42,16 +55,27 @@ export const CONFIG = {
     ropeClearResetsPush: true, // clearing a rope resets the push timer (a breather)
     chainWindowMs: 1600, // the chain multiplier decays if no untwist lands within this window
     candleTargetOffset: -1, // ASSUMPTION: the bottom red dot sits this many slots left of the marked rope
-    restartFromLevelOne: true, // ASSUMPTION: game over restarts at 1-1
+    restartFromLevelOne: true, // endless mode only: game over restarts at 1-1
+    walkMode: true, // walks with a timer and a dogs-home target (false = endless board, clear every rope)
+    retrySameWalk: true, // walk mode: a failed walk is retried, score kept
   },
 
+  breeds: [
+    { name: 'Mutt', emoji: '\u{1F415}', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: false },
+    { name: 'Poodle', emoji: '\u{1F429}', tangleWeight: 1, pointsMul: 2, pushFactor: 1, freeBonusMs: 0, cascade: false },
+    { name: 'Guide dog', emoji: '\u{1F9AE}', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: true },
+    { name: 'Service dog', emoji: '\u{1F415}\u200D\u{1F9BA}', tangleWeight: 1, pointsMul: 1, pushFactor: 1, freeBonusMs: 6000, cascade: false },
+    { name: 'Pug', emoji: '\u{1F436}', tangleWeight: 2.2, pointsMul: 1, pushFactor: 1, freeBonusMs: 0, cascade: false },
+    { name: 'Husky', emoji: '\u{1F43A}', tangleWeight: 1, pointsMul: 1, pushFactor: 0.8, freeBonusMs: 0, cascade: false },
+  ] as BreedDef[],
+
   levels: [
-    { ropes: 6, colors: 3, pushIntervalMs: 4500, knotsPerGapPerPush: 0.4, initialKnots: 9 },
-    { ropes: 7, colors: 4, pushIntervalMs: 4200, knotsPerGapPerPush: 0.45, initialKnots: 11 },
-    { ropes: 7, colors: 4, pushIntervalMs: 3800, knotsPerGapPerPush: 0.5, initialKnots: 13 },
-    { ropes: 8, colors: 5, pushIntervalMs: 3500, knotsPerGapPerPush: 0.5, initialKnots: 15 },
-    { ropes: 8, colors: 6, pushIntervalMs: 3200, knotsPerGapPerPush: 0.55, initialKnots: 17 },
-    { ropes: 9, colors: 7, pushIntervalMs: 3000, knotsPerGapPerPush: 0.6, initialKnots: 19 },
+    { ropes: 6, colors: 3, pushIntervalMs: 4500, knotsPerGapPerPush: 0.4, initialKnots: 9, walkMs: 60000, dogsToFree: 4 },
+    { ropes: 7, colors: 4, pushIntervalMs: 4200, knotsPerGapPerPush: 0.45, initialKnots: 11, walkMs: 60000, dogsToFree: 5 },
+    { ropes: 7, colors: 4, pushIntervalMs: 3800, knotsPerGapPerPush: 0.5, initialKnots: 13, walkMs: 60000, dogsToFree: 6 },
+    { ropes: 8, colors: 5, pushIntervalMs: 3500, knotsPerGapPerPush: 0.5, initialKnots: 15, walkMs: 65000, dogsToFree: 6 },
+    { ropes: 8, colors: 6, pushIntervalMs: 3200, knotsPerGapPerPush: 0.55, initialKnots: 17, walkMs: 65000, dogsToFree: 7 },
+    { ropes: 9, colors: 7, pushIntervalMs: 3000, knotsPerGapPerPush: 0.6, initialKnots: 19, walkMs: 70000, dogsToFree: 8 },
   ] as LevelDef[],
   beyondLastLevel: { pushIntervalFactor: 0.92, minPushIntervalMs: 1500 },
 
@@ -71,6 +95,7 @@ export const CONFIG = {
     candleRope: 300, // rope burned away by a candle
     bonusUnused: 250, // each unspent bonus at stage end
     stageClear: 1000,
+    perSecondLeft: 20, // walk mode: points per second left on the clock when the last dog gets home
   },
 
   colors: {

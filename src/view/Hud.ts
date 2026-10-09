@@ -20,6 +20,9 @@ export class Hud {
   private readonly candleBar: Phaser.GameObjects.Graphics;
   private readonly candleText: Phaser.GameObjects.Text;
   private readonly readyText: Phaser.GameObjects.Text;
+  private readonly timerText: Phaser.GameObjects.Text;
+  private readonly homeText: Phaser.GameObjects.Text;
+  private lastWholeSecond = -1;
   flipEnabled = false;
 
   constructor(private readonly scene: Phaser.Scene) {
@@ -38,11 +41,11 @@ export class Hud {
       .setDepth(50);
 
     this.levelText = scene.add
-      .text(L.width / 2, 22, '1-1', { fontFamily: FONT, fontSize: '22px', color: txt, fontStyle: 'bold' })
+      .text(L.width / 2, 10, 'WALK 1-1', { fontFamily: FONT, fontSize: '12px', color: dim })
       .setOrigin(0.5, 0)
       .setDepth(50);
-    scene.add
-      .text(L.width / 2, 50, 'STAGE', { fontFamily: FONT, fontSize: '11px', color: dim })
+    this.timerText = scene.add
+      .text(L.width / 2, 24, '1:00', { fontFamily: FONT, fontSize: '32px', color: txt, fontStyle: 'bold' })
       .setOrigin(0.5, 0)
       .setDepth(50);
 
@@ -73,9 +76,12 @@ export class Hud {
     this.readyText = scene.add
       .text(16, 80, '', { fontFamily: FONT, fontSize: '13px', color: dim, fontStyle: 'bold' })
       .setDepth(50);
+    this.homeText = scene.add
+      .text(16, footerTop + 46, '', { fontFamily: FONT, fontSize: '15px', color: txt, fontStyle: 'bold' })
+      .setDepth(50);
     this.candleBar = scene.add.graphics().setDepth(50);
     this.candleText = scene.add
-      .text(16, footerTop + 50, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb07a', fontStyle: 'bold' })
+      .text(16, footerTop + 66, '', { fontFamily: FONT, fontSize: '12px', color: '#ffb07a', fontStyle: 'bold' })
       .setDepth(50);
 
     this.setBonuses(0);
@@ -92,7 +98,34 @@ export class Hud {
   }
 
   setLevel(level: number, stage: number): void {
-    this.levelText.setText(`${level}-${stage}`);
+    this.levelText.setText(CONFIG.rules.walkMode ? `WALK ${level}-${stage}` : `STAGE ${level}-${stage}`);
+  }
+
+  /** Walk clock. Amber under 10 s, pulses every second under 5 s. */
+  setWalk(msLeft: number): void {
+    if (!CONFIG.rules.walkMode) {
+      this.timerText.setText('');
+      return;
+    }
+    const sec = Math.max(0, Math.ceil(msLeft / 1000));
+    const m = Math.floor(sec / 60);
+    const ss = String(sec % 60).padStart(2, '0');
+    this.timerText.setText(`${m}:${ss}`);
+    this.timerText.setColor(sec <= 10 ? '#ffb42e' : CONFIG.colors.text);
+    if (sec <= 5 && sec !== this.lastWholeSecond) {
+      this.scene.tweens.add({ targets: this.timerText, scale: { from: 1.3, to: 1 }, duration: 250 });
+    }
+    this.lastWholeSecond = sec;
+  }
+
+  setHome(freed: number, target: number): void {
+    if (!CONFIG.rules.walkMode) {
+      this.homeText.setText(`DOGS LEFT ${target - freed}`);
+      return;
+    }
+    const paws = '\u{1F3E0} '.repeat(0) + `${freed}/${target} HOME`;
+    this.homeText.setText(paws);
+    if (freed > 0) this.scene.tweens.add({ targets: this.homeText, scale: { from: 1.3, to: 1 }, duration: 220, ease: 'Back.easeOut' });
   }
 
   setChain(chain: number): void {
@@ -145,7 +178,7 @@ export class Hud {
     }
     const L = CONFIG.layout;
     const x = 16;
-    const y = L.height - L.footerHeight + 72;
+    const y = L.height - L.footerHeight + 84;
     const w = 150;
     this.candleText.setText('CANDLE: line up the dots, tap the bottom one');
     this.candleBar.fillStyle(0x2a2e3f, 1);

@@ -15,6 +15,7 @@ function setup(top: 'left' | 'right'): { g: Game; knot: Knot } {
   const g = fresh();
   g.ropes.forEach((r, i) => (r.color = i % 2));
   g.knots = [];
+  g.ropes.forEach((r) => (r.breed = 0)); // plain mutts: no breed effects in the parity tests
   g.knots.push({ id: 900, left: g.ropes[2].id, right: g.ropes[3].id, top, row: 5, power: 'none' });
   // keep the other ropes alive with far-away knots so nothing vanishes mid-test
   for (let i = 0; i < g.ropes.length - 1; i++) {
@@ -196,6 +197,8 @@ describe('ropes and pushes', () => {
   it('clearing the last rope ends the stage and cashes unused bonuses', () => {
     const g = fresh();
     g.ropes = g.ropes.slice(0, 2);
+    g.ropes.forEach((r) => (r.breed = 0));
+    g.walkMsLeft = 0;
     g.ropes.forEach((r, i) => (r.color = i));
     g.knots = [{ id: 1, left: g.ropes[0].id, right: g.ropes[1].id, top: 'right', row: 3, power: 'none' }];
     g.bonuses = 2;
@@ -207,8 +210,67 @@ describe('ropes and pushes', () => {
     expect(g.status).toBe('stageClear');
     const s = CONFIG.scoring;
     expect(g.score).toBe(before + s.untwist + 2 * s.ropeRemoved + 2 * s.bonusUnused + s.stageClear);
+    expect(g.dogsFreed).toBe(2);
     g.nextStage();
     expect(g.stage).toBe(2);
     expect(g.status).toBe('playing');
+  });
+});
+
+describe('walks and breeds', () => {
+  it('the walk ends when the clock runs out', () => {
+    const g = fresh();
+    g.tick(CONFIG.levels[0].walkMs + 1);
+    expect(g.status).toBe('gameOver');
+    expect(g.drain().some((e) => e.type === 'walkOver')).toBe(true);
+  });
+
+  it('reaching the dogs-home target finishes the walk with a time bonus', () => {
+    const g = fresh();
+    g.ropes.forEach((r, i) => ((r.color = i % 2), (r.breed = 0)));
+    g.walkTarget = 1;
+    g.knots = [{ id: 1, left: g.ropes[0].id, right: g.ropes[1].id, top: 'right', row: 3, power: 'none' }];
+    for (let i = 2; i < g.ropes.length - 1; i++) {
+      g.knots.push({ id: 10 + i, left: g.ropes[i].id, right: g.ropes[i + 1].id, top: 'left', row: i, power: 'none' });
+    }
+    g.frameType = 'blue';
+    g.moveFrame(0);
+    g.drain();
+    g.walkMsLeft = 10000;
+    g.act();
+    expect(g.status).toBe('stageClear');
+    const ev = g.drain().find((e) => e.type === 'stageClear');
+    expect(ev && ev.type === 'stageClear' && ev.secondsLeft).toBe(10);
+  });
+
+  it('a husky on the board shortens the push interval; a poodle doubles knot points', () => {
+    const g = fresh();
+    g.ropes.forEach((r) => (r.breed = 0));
+    const plain = g.pushIntervalMs;
+    g.ropes[0].breed = CONFIG.breeds.findIndex((b) => b.pushFactor < 1);
+    expect(g.pushIntervalMs).toBeLessThan(plain);
+    const { g: h, knot } = setup('right');
+    h.ropes.forEach((r) => (r.breed = 0));
+    h.ropes[2].breed = CONFIG.breeds.findIndex((b) => b.pointsMul > 1);
+    h.frameType = 'blue';
+    h.act();
+    const ev = h.drain().find((e) => e.type === 'untwist');
+    expect(ev && ev.type === 'untwist' && ev.knot.id).toBe(knot.id);
+    expect(ev && ev.type === 'untwist' && ev.points).toBe(CONFIG.scoring.untwist * 2);
+  });
+
+  it('a service dog adds walk time when it gets home', () => {
+    const { g } = setup('right');
+    g.ropes[2].breed = CONFIG.breeds.findIndex((b) => b.freeBonusMs > 0);
+    const before = g.walkMsLeft;
+    g.act();
+    expect(g.walkMsLeft).toBeGreaterThan(before);
+    expect(g.drain().some((e) => e.type === 'walkBonus')).toBe(true);
+  });
+
+  it('every breed is dealt before any repeats', () => {
+    const g = fresh();
+    const breeds = new Set(g.ropes.map((r) => r.breed));
+    expect(breeds.size).toBe(Math.min(CONFIG.breeds.length, g.ropes.length));
   });
 });

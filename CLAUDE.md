@@ -22,7 +22,10 @@ src/model/game.test.ts
 src/scenes/           MenuScene (title, two-tap toggle), GameScene (plays model events as animations)
 src/view/             Layout (geometry), BraidView (all leashes, morphs between snapshots), KnotView (overlays), FrameView, Hud
 docs/GAME_RULES.md    rules, tunables, assumptions
+scripts/              make_icons.py (PWA icons), record_clip.py (demo-bot clip; clips/ is git-ignored)
+public/               manifest + icons
 ```
+URL params: `?auto=1` demo bot (skips the menu, muted), `?seed=N` reproducible run.
 The model never touches Phaser; the scene calls a command, drains `model.drain()` and animates each event.
 
 ## Commands

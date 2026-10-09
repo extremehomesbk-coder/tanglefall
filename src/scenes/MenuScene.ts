@@ -21,6 +21,12 @@ export class MenuScene extends Phaser.Scene {
     const { width, height } = CONFIG.layout;
     this.twoTap = getTwoTap(CONFIG.rules.twoTapMode);
     setMuted(getMute());
+    // ?auto=1 (demo / clip recording) skips the menu
+    if (new URLSearchParams(window.location.search).has('auto')) {
+      setMuted(true);
+      this.scene.start('game', { twoTap: false });
+      return;
+    }
 
     this.add
       .text(width / 2, height * 0.2, CONFIG.title.toUpperCase(), {
@@ -47,7 +53,8 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: [fb, fr], y: '+=6', duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     const rules = [
-      'Six dogs, six leashes, one tangle. Tap a gap to work its lowest knot.',
+      'Six dogs, six leashes, one tangle. Get the dogs home before the walk ends.',
+      'Tap a gap to work its lowest knot.',
       'BLUE frame undoes knots where the RIGHT leash is on top (bright strand).',
       'RED frame undoes knots where the LEFT leash is on top.',
       'The frame flips after every move. Wrong frame = tighter knot and the bar jumps.',
@@ -57,10 +64,10 @@ export class MenuScene extends Phaser.Scene {
     this.add
       .text(width / 2, height * 0.42, rules.join('\n'), {
         fontFamily: FONT,
-        fontSize: '14px',
+        fontSize: '13px',
         color: CONFIG.colors.textDim,
         align: 'center',
-        lineSpacing: 7,
+        lineSpacing: 4,
         wordWrap: { width: width - 48 },
       })
       .setOrigin(0.5, 0);

@@ -4,6 +4,21 @@ Working title. Original mechanics-inspired puzzle; no third-party names, art, so
 Every number below lives in `src/config.ts`. Lines marked **ASSUMPTION** were not confirmed by the
 brief and are the first things to playtest.
 
+## v0.4 (2026-10-09): walks, breeds, icon, clip
+- `rules.walkMode = true`: a stage is a walk of `walkMs` (60 s at level 1) with a target of `dogsToFree` dogs home
+  (4 of 6 at 1-1). Reaching the target ends the walk: `stageClear` + `perSecondLeft` (20) per second left on the clock.
+  Time out = "TIME'S UP"; a knot on the floor = "TANGLED!"; both retry the same walk with the score kept
+  (`rules.retrySameWalk`). `walkMode = false` is the old endless board (clear every rope, game over restarts at 1-1).
+- `breeds[]` (one of each dealt before repeats): Mutt (plain); Poodle (x2 points on its leash); Guide dog (freeing it
+  unties the bottom knot of both neighbouring gaps); Service dog (+6 s walk time when home); Pug (its leash gets new
+  knots 2.2x as often); Husky (push interval x0.8 while it is on the board). All numbers in `config.breeds`.
+- HUD: walk clock centre (amber under 10 s, pulses under 5 s), "n/N HOME" bottom-left, "UNTANGLE! get N dogs home" at
+  walk start. The dog under each leash is its breed's emoji (placeholder).
+- Home-screen icon + web manifest (`public/`, drawn by `scripts/make_icons.py`).
+- Demo bot: `?auto=1` skips the menu and plays (prefers deep stacks and danger knots, spends bonuses when stuck);
+  `?seed=N` makes a run reproducible. `scripts/record_clip.py` records a muted 1080x1920 clip of it (Python Playwright
+  + Playwright's ffmpeg, VP8 webm; a system ffmpeg with libx264 would give mp4) into `clips/` (git-ignored).
+
 ## v0.3 (2026-10-09): the leashes really braid
 Owner's verdict on v0.2: "a game for sure, although very boring". Research on the genre that sells on vertical video
 (Tangle Master 3D, Twisted Tangle, the dog-leash clones) says the hook is *watching* ropes physically untangle.

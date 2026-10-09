@@ -57,6 +57,9 @@ export class Game {
   status: Status = 'playing';
   chainMsLeft = 0;
   pushCount = 0;
+  dogsFreed = 0;
+  walkMsLeft = 0;
+  walkTarget = 0;
 
   private readonly rng: Rng;
   private nextId = 1;
@@ -91,8 +94,13 @@ export class Game {
   }
 
   get pushIntervalMs(): number {
-    const base = this.levelDef.pushIntervalMs * this.cfg.rules.stageSpeedup ** (this.stage - 1);
+    let base = this.levelDef.pushIntervalMs * this.cfg.rules.stageSpeedup ** (this.stage - 1);
+    for (const r of this.ropes) base *= this.breedOf(r).pushFactor; // huskies drag the bar
     return Math.max(this.cfg.beyondLastLevel.minPushIntervalMs, base);
+  }
+
+  breedOf(rope: Rope) {
+    return this.cfg.breeds[rope.breed % this.cfg.breeds.length];
   }
 
   ropeIndex(id: number): number {
@@ -187,14 +195,24 @@ export class Game {
     this.chain = 0;
     this.chainMsLeft = 0;
     this.pushCount = 0;
+    this.dogsFreed = 0;
+    this.walkMsLeft = def.walkMs;
+    this.walkTarget = this.cfg.rules.walkMode ? Math.min(def.dogsToFree, def.ropes) : def.ropes;
     this.status = 'playing';
+    // one of each breed first, then repeats, dealt in random order
+    const deck: number[] = [];
+    while (deck.length < def.ropes) for (let b = 0; b < this.cfg.breeds.length && deck.length < def.ropes; b++) deck.push(b);
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = this.rng.int(i + 1);
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
     for (let i = 0; i < def.ropes; i++) {
       let color = this.rng.int(def.colors);
       const prev = this.ropes[i - 1];
       if (!this.cfg.rules.adjacentSameColor && def.colors > 1 && prev && color === prev.color) {
         color = (color + 1 + this.rng.int(def.colors - 1)) % def.colors;
       }
-      this.ropes.push({ id: this.nextId++, color });
+      this.ropes.push({ id: this.nextId++, color, breed: deck[i] });
     }
 
     const maxRow = Math.max(1, Math.floor(this.cfg.board.rows * this.cfg.board.startRowsFraction)) - 1;
@@ -212,6 +230,11 @@ export class Game {
     this.frameType = 'red';
     const readyRed = this.readyCount();
     this.frameType = readyRed > readyBlue ? 'red' : 'blue';
+  }
+
+  /** Walk mode: play the same walk again (score kept). */
+  retryWalk(): void {
+    this.startStage(this.level, this.stage);
   }
 
   nextStage(): void {
@@ -267,7 +290,7 @@ export class Game {
       this.cfg.rules.orientation === 'alternate' ? (this.pushCount % 2 === 0 ? 'left' : 'right') : undefined;
     let tries = 0;
     while (spawned.length < want && this.gapCount > 0 && tries++ < this.gapCount * 3) {
-      const k = this.spawnKnot(this.rng.int(this.gapCount), 0, this.cfg.board.spawnRows - 1, layerTop);
+      const k = this.spawnKnot(this.weightedGap(), 0, this.cfg.board.spawnRows - 1, layerTop);
       if (k) spawned.push(k);
     }
     this.emit({ type: 'push', spawned });
@@ -277,9 +300,18 @@ export class Game {
     }
   }
 
-  /** Candle countdown and chain decay. */
+  /** Walk clock, candle countdown and chain decay. */
   tick(dtMs: number): void {
     if (this.status !== 'playing') return;
+    if (this.cfg.rules.walkMode) {
+      this.walkMsLeft -= dtMs;
+      if (this.walkMsLeft <= 0) {
+        this.walkMsLeft = 0;
+        this.status = 'gameOver';
+        this.emit({ type: 'walkOver', dogsFreed: this.dogsFreed, walkTarget: this.walkTarget });
+        return;
+      }
+    }
     if (this.chain > 0) {
       this.chainMsLeft -= dtMs;
       if (this.chainMsLeft <= 0) {
@@ -315,6 +347,23 @@ export class Game {
     this.events.push(e);
   }
 
+  /** Pugs tangle more: pick a column pair weighted by the leashes that start there. */
+  private weightedGap(): number {
+    const weights: number[] = [];
+    let total = 0;
+    for (let g = 0; g < this.gapCount; g++) {
+      const w = Math.max(this.breedOf(this.ropes[g]).tangleWeight, this.breedOf(this.ropes[g + 1]).tangleWeight);
+      weights.push(w);
+      total += w;
+    }
+    let x = this.rng.next() * total;
+    for (let g = 0; g < weights.length; g++) {
+      x -= weights[g];
+      if (x < 0) return g;
+    }
+    return Math.max(0, weights.length - 1);
+  }
+
   private flip(spent: boolean): void {
     this.frameType = this.frameType === 'blue' ? 'red' : 'blue';
     this.emit({ type: 'frameFlipped', frameType: this.frameType, spent });
@@ -348,12 +397,7 @@ export class Game {
   }
 
   private untwist(knot: Knot): void {
-    this.knots = this.knots.filter((k) => k.id !== knot.id);
-    this.chain = Math.min(this.chain + 1, this.cfg.scoring.chainMax);
-    this.chainMsLeft = this.cfg.rules.chainWindowMs;
-    const points = this.cfg.scoring.untwist * this.chain;
-    this.score += points;
-    this.emit({ type: 'untwist', knot, chain: this.chain, points });
+    this.untwistCore(knot);
     if (knot.power === 'sparkle') {
       this.bonuses += 1;
       this.emit({ type: 'bonus', bonuses: this.bonuses });
@@ -431,7 +475,19 @@ export class Game {
     this.knots = this.knots.filter((k) => k.left !== rope.id && k.right !== rope.id);
     this.ropes.splice(index, 1);
     if (cause === 'untwist') this.score += this.cfg.scoring.ropeRemoved;
-    this.emit({ type: 'ropeRemoved', rope, index, cause, knots: gone });
+    this.dogsFreed += 1;
+    this.emit({ type: 'ropeRemoved', rope, index, cause, knots: gone, dogsFreed: this.dogsFreed, walkTarget: this.walkTarget });
+    const breed = this.breedOf(rope);
+    if (breed.freeBonusMs > 0 && this.cfg.rules.walkMode) {
+      this.walkMsLeft += breed.freeBonusMs;
+      this.emit({ type: 'walkBonus', ms: breed.freeBonusMs, ropeId: rope.id });
+    }
+    if (breed.cascade) {
+      for (const g of [index - 1, index]) {
+        const k = this.bottomKnot(g);
+        if (k) this.untwistCore(k);
+      }
+    }
     if (this.candle && this.candle.ropeId === rope.id) {
       this.candle = null;
       this.emit({ type: 'candleEnd', success: false });
@@ -451,14 +507,29 @@ export class Game {
     }
   }
 
+  /** Remove a knot and score it, without touching the frame (used by the untwist command and by cascades). */
+  private untwistCore(knot: Knot): void {
+    const pair = this.ropesAtKnot(knot);
+    const mul = pair ? Math.max(this.breedOf(pair[0]).pointsMul, this.breedOf(pair[1]).pointsMul) : 1;
+    this.knots = this.knots.filter((k) => k.id !== knot.id);
+    this.chain = Math.min(this.chain + 1, this.cfg.scoring.chainMax);
+    this.chainMsLeft = this.cfg.rules.chainWindowMs;
+    const points = this.cfg.scoring.untwist * this.chain * mul;
+    this.score += points;
+    this.emit({ type: 'untwist', knot, chain: this.chain, points });
+  }
+
   private checkStageClear(): void {
-    if (this.ropes.length > 0 || this.status !== 'playing') return;
+    if (this.status !== 'playing') return;
+    const done = this.ropes.length === 0 || (this.cfg.rules.walkMode && this.dogsFreed >= this.walkTarget);
+    if (!done) return;
     const s = this.cfg.scoring;
-    const bonusPoints = this.bonuses * s.bonusUnused + s.stageClear;
+    const secondsLeft = this.cfg.rules.walkMode ? Math.floor(this.walkMsLeft / 1000) : 0;
+    const bonusPoints = this.bonuses * s.bonusUnused + s.stageClear + secondsLeft * s.perSecondLeft;
     this.score += bonusPoints;
     this.bonuses = 0;
     this.candle = null;
     this.status = 'stageClear';
-    this.emit({ type: 'stageClear', bonusPoints, level: this.level, stage: this.stage });
+    this.emit({ type: 'stageClear', bonusPoints, level: this.level, stage: this.stage, secondsLeft });
   }
 }

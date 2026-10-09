@@ -11,7 +11,8 @@ import { KnotView } from '../view/KnotView';
 import { Layout } from '../view/layout';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-const DOGS = ['\u{1F415}', '\u{1F429}', '\u{1F9AE}', '\u{1F415}‍\u{1F9BA}', '\u{1F436}', '\u{1F43A}'];
+const AUTO_EVERY_MS = 420;
+type OverlayKind = 'stageClear' | 'walkOver' | 'gameOver';
 
 export interface GameSceneData {
   twoTap?: boolean;
@@ -36,6 +37,8 @@ export class GameScene extends Phaser.Scene {
   private best = 0;
   private ropesBefore: Rope[] = [];
   private pendingTransition: Phaser.Time.TimerEvent | null = null;
+  private auto = false;
+  private autoTimer = 0;
 
   constructor() {
     super('game');
@@ -52,7 +55,10 @@ export class GameScene extends Phaser.Scene {
     this.pushTimer = 0;
     this.best = getHighScore();
 
-    this.model = new Game(CONFIG);
+    const q = new URLSearchParams(window.location.search);
+    const seed = Number(q.get('seed'));
+    this.auto = q.has('auto');
+    this.model = new Game(CONFIG, Number.isFinite(seed) && seed > 0 ? seed : undefined);
     this.model.startStage(1, 1);
     this.model.drain();
     this.layout = new Layout();
@@ -71,6 +77,19 @@ export class GameScene extends Phaser.Scene {
 
   private getReady(): void {
     const L = this.layout;
+    if (CONFIG.rules.walkMode) {
+      const sub = this.add
+        .text(L.width / 2, L.boardTop + L.boardHeight * 0.4 + 34, `get ${this.model.walkTarget} dogs home`, {
+          fontFamily: FONT,
+          fontSize: '18px',
+          color: CONFIG.colors.text,
+          stroke: '#000',
+          strokeThickness: 4,
+        })
+        .setOrigin(0.5)
+        .setDepth(90);
+      this.tweens.add({ targets: sub, alpha: 0, delay: 900, duration: 300, onComplete: () => sub.destroy() });
+    }
     const t = this.add
       .text(L.width / 2, L.boardTop + L.boardHeight * 0.4, 'UNTANGLE!', {
         fontFamily: FONT,
@@ -190,6 +209,8 @@ export class GameScene extends Phaser.Scene {
     this.hud.setChain(m.chain);
     this.hud.setFrame(m.frameType);
     this.hud.setReady(m.readyCount(), m.bonuses);
+    this.hud.setHome(m.dogsFreed, m.walkTarget);
+    this.hud.setWalk(m.walkMsLeft);
     this.frame.redraw(m.frameType);
     this.placeFrame(false);
     this.refreshPreview();
@@ -197,7 +218,7 @@ export class GameScene extends Phaser.Scene {
 
   private makeDog(rope: Rope): void {
     const dog = this.add
-      .text(0, this.layout.boardBottom + 20, DOGS[rope.id % DOGS.length], { fontSize: '24px' })
+      .text(0, this.layout.boardBottom + 20, this.model.breedOf(rope).emoji, { fontSize: '24px' })
       .setOrigin(0.5)
       .setDepth(11);
     this.dogViews.set(rope.id, dog);
@@ -415,15 +436,26 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(CONFIG.anim.untwistMs, () => this.ropeFlash(e.rope));
         playRopeClear();
         if (e.cause === 'untwist' && CONFIG.rules.ropeClearResetsPush) this.pushTimer = 0;
+        this.hud.setHome(e.dogsFreed, e.walkTarget);
         this.floatText(
           this.layout.centerX,
           this.layout.boardTop + 60,
-          e.cause === 'candle' ? `BURNED +${CONFIG.scoring.candleRope}` : `DOG FREE! +${CONFIG.scoring.ropeRemoved}`,
+          e.cause === 'candle'
+            ? `BURNED +${CONFIG.scoring.candleRope}`
+            : `${m.breedOf(e.rope).name.toUpperCase()} HOME! +${CONFIG.scoring.ropeRemoved}`,
           '#ffd166',
           22,
         );
         break;
       }
+      case 'walkBonus':
+        this.floatText(this.layout.centerX, this.layout.boardTop + 90, `+${Math.round(e.ms / 1000)} s`, '#9dffb0', 20);
+        break;
+      case 'walkOver':
+        if (m.score > getHighScore()) setHighScore(m.score);
+        playGameOver();
+        this.time.delayedCall(500, () => this.showOverlay('walkOver', 0));
+        break;
       case 'frameMoved':
         this.placeFrame(true);
         break;
@@ -452,6 +484,7 @@ export class GameScene extends Phaser.Scene {
         this.floatText(this.frame.x, this.frame.y - 24, 'PAINTED', '#ffffff');
         break;
       case 'stageClear':
+        if (m.score > getHighScore()) setHighScore(m.score);
         this.time.delayedCall(900, () => this.showOverlay('stageClear', e.bonusPoints));
         break;
       case 'gameOver':
@@ -566,21 +599,27 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- overlays ----------
 
-  private showOverlay(kind: 'stageClear' | 'gameOver', bonusPoints: number): void {
+  private showOverlay(kind: OverlayKind, bonusPoints: number): void {
     const L = this.layout;
     const m = this.model;
     const c = this.add.container(0, 0).setDepth(100);
     const bg = this.add.rectangle(L.width / 2, L.height / 2, L.width, L.height, 0x000000, 0.72);
-    const title = kind === 'stageClear' ? `ALL DOGS HOME  ${m.level}-${m.stage}` : 'TANGLED!';
+    const home = `${m.dogsFreed}/${m.walkTarget} home`;
+    const title =
+      kind === 'stageClear' ? `WALK ${m.level}-${m.stage} DONE` : kind === 'walkOver' ? "TIME'S UP" : 'TANGLED!';
     const t1 = this.add
       .text(L.width / 2, L.height / 2 - 70, title, { fontFamily: FONT, fontSize: '30px', color: CONFIG.colors.text, fontStyle: 'bold' })
       .setOrigin(0.5);
-    const line2 = kind === 'stageClear' ? `+${bonusPoints} stage bonus` : `Score ${m.score}   Best ${Math.max(this.best, m.score)}`;
+    const line2 =
+      kind === 'stageClear'
+        ? `${home}   +${bonusPoints} bonus`
+        : `${home}   Score ${m.score}   Best ${Math.max(this.best, m.score)}`;
     const t2 = this.add
       .text(L.width / 2, L.height / 2 - 20, line2, { fontFamily: FONT, fontSize: '18px', color: CONFIG.colors.textDim })
       .setOrigin(0.5);
+    const retry = CONFIG.rules.walkMode && CONFIG.rules.retrySameWalk ? 'TAP TO WALK AGAIN' : 'TAP TO PLAY AGAIN';
     const t3 = this.add
-      .text(L.width / 2, L.height / 2 + 40, kind === 'stageClear' ? 'TAP FOR THE NEXT WALK' : 'TAP TO PLAY AGAIN', {
+      .text(L.width / 2, L.height / 2 + 40, kind === 'stageClear' ? 'TAP FOR THE NEXT WALK' : retry, {
         fontFamily: FONT,
         fontSize: '20px',
         color: CONFIG.colors.text,
@@ -595,22 +634,81 @@ export class GameScene extends Phaser.Scene {
 
   private dismissOverlay(): void {
     if (!this.overlay) return;
-    const kind = this.overlay.getData('kind') as 'stageClear' | 'gameOver';
+    const kind = this.overlay.getData('kind') as OverlayKind;
     this.overlay.destroy();
     this.overlay = null;
     if (kind === 'stageClear') {
       this.model.nextStage();
-      this.model.drain();
-      this.pushTimer = 0;
-      this.layout.setRopeCount(this.model.ropes.length);
-      this.braid.setTarget(this.snapshot());
-      this.braid.t = 1;
-      this.buildStageViews();
-      this.placeCandleMarkers();
-      this.getReady();
+    } else if (CONFIG.rules.walkMode && CONFIG.rules.retrySameWalk) {
+      this.model.retryWalk();
+    } else {
+      this.scene.restart({ twoTap: this.twoTap });
       return;
     }
-    this.scene.restart({ twoTap: this.twoTap });
+    this.model.drain();
+    this.pushTimer = 0;
+    this.layout.setRopeCount(this.model.ropes.length);
+    this.braid.setTarget(this.snapshot());
+    this.braid.t = 1;
+    this.buildStageViews();
+    this.placeCandleMarkers();
+    this.getReady();
+  }
+
+  // ---------- demo bot (?auto=1): plays a decent game for clips and smoke tests ----------
+
+  private autoStep(): void {
+    const m = this.model;
+    if (this.overlay) {
+      this.dismissOverlay();
+      return;
+    }
+    if (m.status !== 'playing') return;
+    if (m.candle && m.candleAligned()) {
+      this.run(() => this.model.candleConnect());
+      return;
+    }
+    const perms = m.perms();
+    let best = -1;
+    let bestScore = -1;
+    for (let g = 0; g < m.gapCount; g++) {
+      const k = m.bottomKnot(g);
+      if (!k || !m.wouldUntwist(k, m.frameType, perms)) continue;
+      const score = m.knotsInGap(g).length + (m.isDanger(k) ? 10 : 0) + (k.power !== 'none' ? 2 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = g;
+      }
+    }
+    if (best >= 0) {
+      const g = best;
+      this.run(() => {
+        this.model.moveFrame(g);
+        this.model.act();
+      });
+      return;
+    }
+    if (m.bonuses > 0) {
+      this.run(() => this.model.flipWithBonus());
+      return;
+    }
+    // stuck: tighten the gap whose bottom knot is highest (least dangerous)
+    let g2 = -1;
+    let topRow = Number.MAX_SAFE_INTEGER;
+    for (let g = 0; g < m.gapCount; g++) {
+      const k = m.bottomKnot(g);
+      if (k && k.row < topRow) {
+        topRow = k.row;
+        g2 = g;
+      }
+    }
+    if (g2 >= 0) {
+      const g = g2;
+      this.run(() => {
+        this.model.moveFrame(g);
+        this.model.act();
+      });
+    }
   }
 
   // ---------- frame loop ----------
@@ -630,6 +728,7 @@ export class GameScene extends Phaser.Scene {
       m.tick(delta);
       const evs = m.drain();
       if (evs.length) this.handle(evs);
+      this.hud.setWalk(m.walkMsLeft);
       const frac = Math.min(1, this.pushTimer / interval);
       this.pushBar.clear();
       this.pushBar.fillStyle(0x2a2e3f, 1);
@@ -637,6 +736,13 @@ export class GameScene extends Phaser.Scene {
       this.pushBar.fillStyle(frac > 0.8 ? 0xffb42e : CONFIG.colors.bar, 1);
       this.pushBar.fillRoundedRect(12, L.boardTop - 8, Math.max(6, (L.width - 24) * frac), 6, 3);
       this.hud.setCandle(m.candle ? m.candle.msLeft / m.candle.msTotal : null);
+    }
+    if (this.auto) {
+      this.autoTimer += delta;
+      if (this.autoTimer >= AUTO_EVERY_MS) {
+        this.autoTimer = 0;
+        this.autoStep();
+      }
     }
     if (this.braid.animating || this.braid.dirty) this.braid.draw();
     for (const [id, dog] of this.dogViews) {

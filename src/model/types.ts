@@ -5,6 +5,7 @@ export type PowerUp = 'none' | 'sparkle' | 'candle' | 'brush';
 export interface Rope {
   id: number;
   color: number; // index into CONFIG.colors.palette
+  breed: number; // index into CONFIG.breeds
 }
 
 export interface Knot {
@@ -20,7 +21,9 @@ export type GameEvent =
   | { type: 'untwist'; knot: Knot; chain: number; points: number }
   | { type: 'twist'; knot: Knot; added: Knot | null }
   | { type: 'noKnot'; gap: number }
-  | { type: 'ropeRemoved'; rope: Rope; index: number; cause: 'untwist' | 'candle'; knots: Knot[] }
+  | { type: 'ropeRemoved'; rope: Rope; index: number; cause: 'untwist' | 'candle'; knots: Knot[]; dogsFreed: number; walkTarget: number }
+  | { type: 'walkOver'; dogsFreed: number; walkTarget: number }
+  | { type: 'walkBonus'; ms: number; ropeId: number }
   | { type: 'frameMoved'; gap: number }
   | { type: 'frameFlipped'; frameType: FrameType; spent: boolean }
   | { type: 'push'; spawned: Knot[] }
@@ -29,5 +32,5 @@ export type GameEvent =
   | { type: 'candleStart'; ropeId: number; targetIndex: number; ms: number }
   | { type: 'candleEnd'; success: boolean }
   | { type: 'brush'; ropeIds: number[] }
-  | { type: 'stageClear'; bonusPoints: number; level: number; stage: number }
+  | { type: 'stageClear'; bonusPoints: number; level: number; stage: number; secondsLeft: number }
   | { type: 'gameOver' };
