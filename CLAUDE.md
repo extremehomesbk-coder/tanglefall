@@ -1,6 +1,6 @@
 # Tanglefall (working title)
 
-Mobile-web puzzle prototype: untwist knots between coloured ropes with a frame that flips type after every
+Mobile-web puzzle game (v0.6 ship pass 2026-10-13): untwist knots between coloured ropes with a frame that flips type after every
 action. Own repo (`extremehomesbk-coder/tanglefall`), deployed to GitHub Pages by `.github/workflows/deploy.yml`
 on every push to `main`. Not an EHM or Halsey project: no EHM data, skills or doc routing apply here.
 
@@ -17,19 +17,20 @@ Phaser 3 + TypeScript + Vite. ESLint (flat config, typescript-eslint). Vitest fo
 
 ## Layout
 ```
-src/config.ts         all tuning
-src/model/game.ts     pure rules: state, commands (moveFrame/act/flipWithBonus/push/tick/candleConnect), events
-src/model/game.test.ts
+src/config.ts         all tuning (levels, breeds, coach, daily, haptics, colours, anim, layout)
+src/model/game.ts     pure rules: state, commands (moveFrame/act/flipWithBonus/push/tick/candleConnect), events; game.test.ts
 src/model/bot.ts      demo-bot policy (chooseMove), shared by GameScene ?auto=1 and the simulator
-src/scenes/           MenuScene (title, two-tap toggle), GameScene (plays model events as animations)
-src/view/             Layout (geometry), BraidView (all leashes, morphs between snapshots), KnotView (overlays), FrameView, Hud
-docs/GAME_RULES.md    rules, tunables, assumptions
-scripts/              make_icons.py (PWA icons), make_dogs.py (breed SVGs), record_clip.py (hook/chain/fail clips; clips/ is
-                      git-ignored), sim.test.ts (balance simulator: SIM=1 npx vitest run scripts/sim.test.ts, SIM_PATCH to try tunings)
-public/               manifest + icons + dogs/*.svg
+src/daily.ts          pure daily-walk helpers (date key, seed, streak) + daily.test.ts
+src/storage.ts        localStorage only: best, settings, stats, daily record.  haptics.ts, install.ts, audio.ts (synth)
+src/scenes/           MenuScene (title, daily, help, settings chips), GameScene (plays model events; pause, coach, stats)
+src/view/             Backdrop (park canvas texture + vignette), BraidView (leashes), KnotView, FrameView, Hud, layout
+docs/GAME_RULES.md    rules, tunables, assumptions, per-version notes
+scripts/              make_icons.py, make_dogs.py (breed SVGs), record_clip.py (hook/chain/fail clips into git-ignored clips/),
+                      sim.test.ts (balance simulator: SIM=1 npx vitest run scripts/sim.test.ts, SIM_PATCH to try tunings)
+public/               manifest + icons + dogs/*.svg + sw.js (offline shell, registered in production builds only)
 ```
 URL params: `?auto=1` demo bot (skips the menu, muted), `?seed=N` reproducible run; with auto: `demo=play|chain|fail`,
-`walk=L-S`, `walksec=N`, `hook=text|line2` (clip recipes live in record_clip.py).
+`walk=L-S`, `walksec=N`, `hook=text|line2`, `hold=1` (keep the end card), `mode=daily` (clip recipes live in record_clip.py).
 The model never touches Phaser; the scene calls a command, drains `model.drain()` and animates each event.
 
 ## Commands

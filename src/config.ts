@@ -32,7 +32,7 @@ export interface BreedDef {
 
 export const CONFIG = {
   title: 'Tanglefall',
-  version: '0.5.0',
+  version: '0.6.0',
 
   board: {
     rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game
@@ -58,6 +58,29 @@ export const CONFIG = {
     restartFromLevelOne: true, // endless mode only: game over restarts at 1-1
     walkMode: true, // walks with a timer and a dogs-home target (false = endless board, clear every rope)
     retrySameWalk: true, // walk mode: a failed walk is retried, score kept
+  },
+
+  /** First-walk coach and the optional assist rings (green ring = the current frame untwists this knot). */
+  coach: {
+    firstWalkAssist: true, // the very first walk on this phone shows the rings and a hint, whatever the setting
+    assistDefault: false, // the "Assist rings" setting for every later walk
+    hintMs: 2600, // how long the coach lines stay
+  },
+
+  /** Daily walk: one seeded walk per calendar day (same board for everyone), own best and a streak. */
+  daily: {
+    level: 2,
+    stage: 1,
+    seedBase: 7_311_017, // mixed with YYYYMMDD so the daily seed never collides with a plain run
+  },
+
+  /** navigator.vibrate patterns (ms); Android only, iOS ignores them. Off switch in settings. */
+  haptics: {
+    untwist: 8,
+    twist: 35,
+    home: [15, 40, 25],
+    walkDone: [20, 50, 20, 50, 40],
+    over: 90,
   },
 
   breeds: [
@@ -117,6 +140,18 @@ export const CONFIG = {
     candle: 0xff8a3d,
     brush: 0xffffff,
     bar: 0x6c7390,
+    panel: 0x0d1019, // translucent panel behind the leashes and under the HUD
+    skyTop: 0x0b0d1b,
+    skyMid: 0x1a1b3f,
+    skyHorizon: 0x3a2a5e,
+    hillFar: 0x1a1a38,
+    hillNear: 0x111327,
+    grass: 0x1f3b2d,
+    grassLight: 0x2a5a3c,
+    path: 0x2a2838,
+    moon: 0xfff2c8,
+    star: 0xffffff,
+    confetti: [0xff5a5f, 0xffb42e, 0x7ee04f, 0x3cc8ff, 0xb06cff, 0xffffff],
   },
 
   anim: {
@@ -127,18 +162,21 @@ export const CONFIG = {
     slideMs: 260,
     frameMoveMs: 110,
     chainCallouts: { 4: 'x4 COMBO', 6: 'x6 ON FIRE', 8: 'x8 MAX!' } as Record<number, string>, // big centre text at these chains
+    confettiCount: 22, // pieces when a dog gets home
+    runOffMs: 650, // a freed dog runs off screen in this long
+    floatLaneMs: 650, // centre callouts stack into free lanes so they never overlap
   },
 
   layout: {
     width: 390,
     height: 844,
     hudHeight: 104,
-    footerHeight: 100,
+    footerHeight: 112,
     boardMarginX: 26,
     maxSpacing: 62,
     beadRadius: 5,
     beadGap: 2,
-    dogWidth: 54, // sprite display width (px at 1x), capped at 0.95 x the rope spacing
+    dogWidth: 60, // sprite display width (px at 1x), capped at 0.95 x the rope spacing
     dogCollar: { x: 74 / 120, y: 46 / 110 }, // where the leash meets the sprite (fraction of the SVG box)
   },
 

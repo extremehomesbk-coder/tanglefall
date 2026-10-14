@@ -109,6 +109,8 @@ export class BraidView extends Phaser.GameObjects.Graphics {
       list.push(c);
       byRow.set(c.row, list);
     }
+    // drop shadows first, so every strand floats a little above the panel
+    for (let r = 0; r < this.rows; r++) for (const p of paths.values()) this.shadow(p, r, y);
     for (let r = 0; r < this.rows; r++) {
       const crossings = byRow.get(r) ?? [];
       const busy = new Set<number>();
@@ -126,6 +128,13 @@ export class BraidView extends Phaser.GameObjects.Graphics {
     }
   }
 
+  private shadow(p: { x: number[]; alpha: number }, r: number, y: (r: number) => number): void {
+    const dx = 3;
+    const dy = 4;
+    this.lineStyle(this.thick + 3, 0x000000, 0.26 * p.alpha);
+    this.lineBetween(p.x[r] + dx, y(r) + dy, p.x[r + 1] + dx, y(r + 1) + dy);
+  }
+
   private segment(id: number, p: { x: number[]; alpha: number }, r: number, y: (r: number) => number, over: boolean): void {
     const colorIndex = this.next.colors.get(id) ?? this.prev.colors.get(id) ?? 0;
     const color = CONFIG.colors.palette[colorIndex % CONFIG.colors.palette.length];
@@ -139,7 +148,7 @@ export class BraidView extends Phaser.GameObjects.Graphics {
     if (over) {
       this.lineStyle(w + 7, 0xffffff, 0.9 * a);
       this.lineBetween(x0, y0, x1, y1);
-      this.lineStyle(w + 4, CONFIG.colors.board, a);
+      this.lineStyle(w + 4, CONFIG.colors.panel, 0.95 * a);
       this.lineBetween(x0, y0, x1, y1);
     }
     this.lineStyle(w, color, a);

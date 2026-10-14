@@ -1,6 +1,7 @@
 # Tanglefall (working title)
 
-Mobile-web puzzle prototype. Untwist the knots between coloured ropes before the bar pushes them to the floor.
+Mobile-web puzzle game. Untwist the knots between the dogs' leashes and get the dogs home before the walk ends.
+Daily walk (same board for everyone, streaks), first-walk coach, pause, offline shell (PWA), local stats only.
 Rules, tunables and open assumptions: [docs/GAME_RULES.md](docs/GAME_RULES.md).
 
 Phaser 3 + TypeScript + Vite. `npm run dev` to play locally, `npm run check` before committing.

@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
+import { playTick } from '../audio';
 import { CONFIG } from '../config';
 import type { FrameType } from '../model/types';
 import { drawSlantFrame } from './FrameView';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
 
-/** Top strip (score, level, frame now/next) and bottom strip (flip button, candle timer). */
+/** Top strip (score, walk clock, frame now/next) and footer (home pips, pause, flip button, candle timer). */
 export class Hud {
   private readonly scoreText: Phaser.GameObjects.Text;
   private readonly bestText: Phaser.GameObjects.Text;
@@ -17,11 +18,14 @@ export class Hud {
   private readonly flipBg: Phaser.GameObjects.Graphics;
   private readonly flipText: Phaser.GameObjects.Text;
   private readonly flipRect: Phaser.Geom.Rectangle;
+  private readonly pauseBg: Phaser.GameObjects.Graphics;
+  private readonly pauseCenter: { x: number; y: number };
   private readonly candleBar: Phaser.GameObjects.Graphics;
   private readonly candleText: Phaser.GameObjects.Text;
   private readonly readyText: Phaser.GameObjects.Text;
   private readonly timerText: Phaser.GameObjects.Text;
   private readonly homeText: Phaser.GameObjects.Text;
+  private readonly homePips: Phaser.GameObjects.Graphics;
   private lastWholeSecond = -1;
   flipEnabled = false;
 
@@ -29,8 +33,16 @@ export class Hud {
     const L = CONFIG.layout;
     const dim = CONFIG.colors.textDim;
     const txt = CONFIG.colors.text;
+    const footerTop = L.height - L.footerHeight;
 
-    scene.add.text(16, 12, 'SCORE', { fontFamily: FONT, fontSize: '11px', color: dim }).setDepth(50);
+    // translucent panel behind the top strip
+    const top = scene.add.graphics().setDepth(48);
+    top.fillStyle(CONFIG.colors.panel, 0.72);
+    top.fillRoundedRect(8, -20, L.width - 16, L.hudHeight + 8, 18);
+    top.lineStyle(1.5, CONFIG.colors.boardEdge, 0.7);
+    top.strokeRoundedRect(8, -20, L.width - 16, L.hudHeight + 8, 18);
+
+    scene.add.text(16, 12, 'SCORE', { fontFamily: FONT, fontSize: '11px', color: dim, letterSpacing: 1 }).setDepth(50);
     this.scoreText = scene.add
       .text(16, 26, '0', { fontFamily: FONT, fontSize: '30px', color: txt, fontStyle: 'bold' })
       .setDepth(50);
@@ -41,11 +53,11 @@ export class Hud {
       .setDepth(50);
 
     this.levelText = scene.add
-      .text(L.width / 2, 10, 'WALK 1-1', { fontFamily: FONT, fontSize: '12px', color: dim })
+      .text(L.width / 2, 10, 'WALK 1-1', { fontFamily: FONT, fontSize: '12px', color: dim, letterSpacing: 1 })
       .setOrigin(0.5, 0)
       .setDepth(50);
     this.timerText = scene.add
-      .text(L.width / 2, 24, '1:00', { fontFamily: FONT, fontSize: '32px', color: txt, fontStyle: 'bold' })
+      .text(L.width / 2, 24, '1:00', { fontFamily: FONT, fontSize: '34px', color: txt, fontStyle: 'bold' })
       .setOrigin(0.5, 0)
       .setDepth(50);
 
@@ -60,8 +72,7 @@ export class Hud {
       .setOrigin(0.5, 0)
       .setDepth(50);
 
-    const footerTop = L.height - L.footerHeight;
-    this.flipRect = new Phaser.Geom.Rectangle(L.width - 16 - 124, footerTop + 48, 124, 46);
+    this.flipRect = new Phaser.Geom.Rectangle(L.width - 16 - 124, footerTop + 50, 124, 46);
     this.flipBg = scene.add.graphics().setDepth(50);
     this.flipText = scene.add
       .text(this.flipRect.centerX, this.flipRect.centerY, 'FLIP  ✦ 0', {
@@ -73,15 +84,20 @@ export class Hud {
       .setOrigin(0.5)
       .setDepth(51);
 
+    this.pauseCenter = { x: 204, y: footerTop + 73 };
+    this.pauseBg = scene.add.graphics().setDepth(50);
+    this.drawPause();
+
     this.readyText = scene.add
       .text(16, 80, '', { fontFamily: FONT, fontSize: '13px', color: dim, fontStyle: 'bold' })
       .setDepth(50);
+    this.homePips = scene.add.graphics().setDepth(50);
     this.homeText = scene.add
-      .text(16, footerTop + 58, '', { fontFamily: FONT, fontSize: '15px', color: txt, fontStyle: 'bold' })
+      .text(16, footerTop + 76, '', { fontFamily: FONT, fontSize: '13px', color: txt, fontStyle: 'bold' })
       .setDepth(50);
     this.candleBar = scene.add.graphics().setDepth(50);
     this.candleText = scene.add
-      .text(16, footerTop + 78, '', { fontFamily: FONT, fontSize: '11px', color: '#ffb07a', fontStyle: 'bold' })
+      .text(16, footerTop + 96, '', { fontFamily: FONT, fontSize: '11px', color: '#ffb07a', fontStyle: 'bold' })
       .setDepth(50);
 
     this.setBonuses(0);
@@ -97,11 +113,15 @@ export class Hud {
     this.bestText.setText(`BEST ${n}`);
   }
 
-  setLevel(level: number, stage: number): void {
+  setLevel(level: number, stage: number, daily = false): void {
+    if (daily) {
+      this.levelText.setText('DAILY WALK');
+      return;
+    }
     this.levelText.setText(CONFIG.rules.walkMode ? `WALK ${level}-${stage}` : `STAGE ${level}-${stage}`);
   }
 
-  /** Walk clock. Amber under 10 s, pulses every second under 5 s. */
+  /** Walk clock. Amber under 10 s, pulses and ticks every second under 5 s. */
   setWalk(msLeft: number): void {
     if (!CONFIG.rules.walkMode) {
       this.timerText.setText('');
@@ -112,19 +132,40 @@ export class Hud {
     const ss = String(sec % 60).padStart(2, '0');
     this.timerText.setText(`${m}:${ss}`);
     this.timerText.setColor(sec <= 10 ? '#ffb42e' : CONFIG.colors.text);
-    if (sec <= 5 && sec !== this.lastWholeSecond) {
+    if (sec <= 5 && sec > 0 && sec !== this.lastWholeSecond) {
       this.scene.tweens.add({ targets: this.timerText, scale: { from: 1.3, to: 1 }, duration: 250 });
+      if (this.lastWholeSecond !== -1) playTick();
     }
     this.lastWholeSecond = sec;
   }
 
+  /** Home meter: one pip per dog in the target, ticked as they get home. */
   setHome(freed: number, target: number): void {
+    const L = CONFIG.layout;
+    const footerTop = L.height - L.footerHeight;
+    const g = this.homePips;
+    g.clear();
     if (!CONFIG.rules.walkMode) {
       this.homeText.setText(`DOGS LEFT ${target - freed}`);
       return;
     }
-    const paws = '\u{1F3E0} '.repeat(0) + `${freed}/${target} HOME`;
-    this.homeText.setText(paws);
+    const size = 15;
+    const step = 19;
+    for (let i = 0; i < target; i++) {
+      const x = 16 + i * step;
+      const y = footerTop + 54;
+      const home = i < freed;
+      g.fillStyle(home ? 0x7ee04f : 0x1b1f2e, 1);
+      g.fillRoundedRect(x, y, size, size, 4);
+      g.lineStyle(1.5, home ? 0xb8ff9a : 0x4a5068, 1);
+      g.strokeRoundedRect(x, y, size, size, 4);
+      if (home) {
+        g.lineStyle(2.5, 0x12141c, 1);
+        g.lineBetween(x + 3.5, y + 7.5, x + 6.5, y + 11);
+        g.lineBetween(x + 6.5, y + 11, x + 12, y + 4.5);
+      }
+    }
+    this.homeText.setText(`${freed}/${target} HOME`);
     if (freed > 0) this.scene.tweens.add({ targets: this.homeText, scale: { from: 1.3, to: 1 }, duration: 220, ease: 'Back.easeOut' });
   }
 
@@ -158,7 +199,7 @@ export class Hud {
     this.flipText.setText(`FLIP  ✦ ${n}`);
     const r = this.flipRect;
     this.flipBg.clear();
-    this.flipBg.fillStyle(this.flipEnabled ? 0x3f4a7a : 0x23263a, 1);
+    this.flipBg.fillStyle(this.flipEnabled ? 0x3f4a7a : 0x1b1f2e, 0.95);
     this.flipBg.fillRoundedRect(r.x, r.y, r.width, r.height, 14);
     this.flipBg.lineStyle(2, this.flipEnabled ? 0x8aa4ff : 0x343850, 1);
     this.flipBg.strokeRoundedRect(r.x, r.y, r.width, r.height, 14);
@@ -167,6 +208,24 @@ export class Hud {
 
   hitFlip(x: number, y: number): boolean {
     return this.flipRect.contains(x, y);
+  }
+
+  private drawPause(): void {
+    const g = this.pauseBg;
+    const { x, y } = this.pauseCenter;
+    g.clear();
+    g.fillStyle(0x1b1f2e, 0.95);
+    g.fillCircle(x, y, 21);
+    g.lineStyle(2, 0x343850, 1);
+    g.strokeCircle(x, y, 21);
+    g.fillStyle(0xd7dbe8, 1);
+    g.fillRoundedRect(x - 7, y - 8, 5, 16, 1.5);
+    g.fillRoundedRect(x + 2, y - 8, 5, 16, 1.5);
+  }
+
+  hitPause(x: number, y: number): boolean {
+    const { x: cx, y: cy } = this.pauseCenter;
+    return Math.hypot(x - cx, y - cy) <= 28;
   }
 
   /** fraction 0..1 of candle time left, or null when no candle burns. */
@@ -178,13 +237,13 @@ export class Hud {
     }
     const L = CONFIG.layout;
     const x = 16;
-    const y = L.height - L.footerHeight + 92;
+    const y = L.height - L.footerHeight + 108;
     const w = 150;
     this.candleText.setText('CANDLE: line up the dots, tap the bottom one');
     this.candleBar.fillStyle(0x2a2e3f, 1);
-    this.candleBar.fillRoundedRect(x, y, w, 6, 3);
+    this.candleBar.fillRoundedRect(x, y, w, 5, 2.5);
     this.candleBar.fillStyle(CONFIG.colors.candle, 1);
-    this.candleBar.fillRoundedRect(x, y, Math.max(6, w * fraction), 6, 3);
+    this.candleBar.fillRoundedRect(x, y, Math.max(5, w * fraction), 5, 2.5);
   }
 
   flashFlip(): void {

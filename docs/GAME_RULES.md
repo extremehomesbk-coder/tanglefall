@@ -4,6 +4,37 @@ Working title. Original mechanics-inspired puzzle; no third-party names, art, so
 Every number below lives in `src/config.ts`. Lines marked **ASSUMPTION** were not confirmed by the
 brief and are the first things to playtest.
 
+## v0.6 (2026-10-13): ship pass (graphics + gameplay)
+- **Look**: a dusk park painted once into a canvas texture (`src/view/Backdrop.ts`: sky gradient, stars, moon, two hill
+  lines, grass bank, path), a translucent panel behind the leashes, drop shadows under every strand, the over-strand gap
+  in the panel colour. Dogs carry a body/head highlight, belly shade and ground shadow (`scripts/make_dogs.py`), stand
+  on the grass at `layout.dogWidth` 60, hop when a knot on their leash opens, and run off with squash + dust + confetti
+  (`anim.confettiCount`, `anim.runOffMs`) when home. Red edge vignette while knots sit in the danger rows. HUD: a panel
+  under the top strip, a home meter of ticked pips, a pause button, a tick per second under 5 s, a three-note walk-clear
+  jingle. Centre callouts stack into four lanes (`anim.floatLaneMs`) so x8 MAX / HOME / +6 s never pile up.
+- **Title screen**: the six dogs on their leashes under the title, PLAY (best + furthest walk), DAILY WALK (streak),
+  HOW TO PLAY (rules + a drawn right-on-top / left-on-top knot), chips for Sound / Buzz / Assist rings / Two-tap,
+  a local stats line, an install chip (Chrome's prompt) or the iPhone Share hint.
+- **First-walk coach** (`coach.firstWalkAssist`): the very first walk on a phone shows the green/red rings (green = the
+  current frame untwists it) and two hint pills ("Tap a knot with a GREEN ring"; after the first twist, "RED ring = wrong
+  frame. Every tap flips it."). After that walk the rings follow the Assist rings setting (`coach.assistDefault` off).
+- **Daily walk** (`daily`): one walk per calendar day, level `daily.level`-`daily.stage` (2-1), seed = YYYYMMDD mixed with
+  `daily.seedBase` (`src/daily.ts`, tested), so everyone gets the same board. A retry rebuilds the same board. The
+  record (`tanglefall.daily`) keeps today's best, attempts, cleared, and a streak of consecutive cleared days (a missed or
+  uncleared day resets it). Clearing returns to the menu.
+- **Pause**: footer button, `P` / `Esc`, and automatically when the tab hides (Phaser HIDDEN). The walk clock, pushes and
+  the candle stop; the overlay offers QUIT TO MENU.
+- **Stats** (`tanglefall.stats`, local only): walks played / cleared, dogs home, best chain, furthest walk. Nothing
+  leaves the phone; there is still no analytics or network call. A play/completion counter for ad tests needs a
+  service and is an owner decision (see the brain page).
+- **Haptics** (`haptics`): `navigator.vibrate` on untwist / twist / home / walk done / over; Android only; Buzz chip.
+- **Offline**: `public/sw.js` caches the shell and hashed assets (navigations network-first); registered in production
+  builds only. `index.html` links the manifest and the iOS icon. Theme colour is the sky top.
+- **End-of-walk cards**: home count (capped at the target: a guide-dog cascade can free one extra), bonus, best chain,
+  score; daily adds streak and today's best.
+- **Clip knobs**: `?hold=1` leaves the end-of-walk card on screen for the bot; `?mode=daily` plays the daily board.
+- Tuning untouched (sim numbers of v0.5 still hold); the first walk is easier in practice because of the rings.
+
 ## v0.5 (2026-10-09): judged, tuned, drawn
 - **Judged by simulation** (`scripts/sim.test.ts`, run `SIM=1 npx vitest run scripts/sim.test.ts`): the pure model plays
   whole walks with the demo-bot policy at four paces (bot 0.42 s/tap; "good" 0.8 s + 5% misreads; "casual" 1.1 s + 12%;

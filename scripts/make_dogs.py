@@ -1,6 +1,6 @@
 """Original flat-style dog sprites, one SVG per breed, drawn from shared parts. Writes public/dogs/<breed>.svg.
 
-Side view, facing right, 120x110 viewBox. The collar sits at (74, 46): the scene hangs the leash end there.
+Side view, facing right, 120x110 viewBox. v0.6: body/head highlight, belly shade, ground shadow. The collar sits at (74, 46): the scene hangs the leash end there.
 Run: python scripts/make_dogs.py
 """
 
@@ -29,12 +29,24 @@ def legs(fill: str, cuff: str | None = None) -> list[str]:
     return out
 
 
-def body(fill: str, ry: int = 20) -> str:
-    return el("ellipse", cx=56, cy=60, rx=32, ry=ry, fill=fill, stroke=INK, stroke_width=SW)
+def ground_shadow() -> str:
+    return el("ellipse", cx=60, cy=101, rx=40, ry=5, fill="#000000", fill_opacity=0.38)
 
 
-def head(fill: str, r: int = 20) -> str:
-    return el("circle", cx=88, cy=42, r=r, fill=fill, stroke=INK, stroke_width=SW)
+def body(fill: str, ry: int = 20) -> list[str]:
+    """Body ellipse with a soft highlight on the back and a shade along the belly (flat style, a little depth)."""
+    return [
+        el("ellipse", cx=56, cy=60, rx=32, ry=ry, fill=fill, stroke=INK, stroke_width=SW),
+        el("ellipse", cx=48, cy=60 - ry * 0.45, rx=20, ry=ry * 0.32, fill="#ffffff", fill_opacity=0.16),
+        el("ellipse", cx=58, cy=60 + ry * 0.5, rx=26, ry=ry * 0.36, fill=INK, fill_opacity=0.14),
+    ]
+
+
+def head(fill: str, r: int = 20) -> list[str]:
+    return [
+        el("circle", cx=88, cy=42, r=r, fill=fill, stroke=INK, stroke_width=SW),
+        el("circle", cx=82, cy=35, r=r * 0.42, fill="#ffffff", fill_opacity=0.16),
+    ]
 
 
 def snout(fill: str, nose: str = INK) -> list[str]:
@@ -108,11 +120,12 @@ def svg(parts: list[str]) -> str:
 def mutt() -> list[str]:
     brown, cream = "#b8824f", "#f3e3c6"
     return [
+        ground_shadow(),
         tail_wag(brown),
         *legs(brown),
-        body(brown),
+        *body(brown),
         el("ellipse", cx=66, cy=66, rx=14, ry=10, fill=cream),  # chest patch
-        head(brown),
+        *head(brown),
         el("circle", cx=95, cy=38, r=9, fill="#6b4a2b"),  # eye patch
         *snout(cream),
         tongue(),
@@ -126,12 +139,13 @@ def poodle() -> list[str]:
     cream, shade = "#f6efe4", "#e2d3bd"
     pom = lambda cx, cy, r: el("circle", cx=cx, cy=cy, r=r, fill=cream, stroke=INK, stroke_width=SW)  # noqa: E731
     return [
+        ground_shadow(),
         el("path", d="M26 54 q-10 -8 -8 -22", fill="none", stroke=INK, stroke_width=SW + 4, stroke_linecap="round"),
         el("path", d="M26 54 q-10 -8 -8 -22", fill="none", stroke=shade, stroke_width=SW, stroke_linecap="round"),
         pom(18, 30, 9),
         *legs(shade, cuff=cream),
-        body(cream, ry=18),
-        head(cream, r=18),
+        *body(cream, ry=18),
+        *head(cream, r=18),
         pom(76, 26, 9),
         pom(86, 20, 10),
         pom(97, 25, 8),
@@ -145,9 +159,10 @@ def poodle() -> list[str]:
 def guide_dog() -> list[str]:
     yellow, light = "#e3c285", "#f4e2b8"
     return [
+        ground_shadow(),
         tail_wag(yellow),
         *legs(yellow),
-        body(yellow),
+        *body(yellow),
         el("ellipse", cx=66, cy=68, rx=14, ry=9, fill=light),
         # harness: chest band + rigid handle up over the back
         el("path", d="M42 44 q14 -10 30 -2", fill="none", stroke="#555b70", stroke_width=5, stroke_linecap="round"),
@@ -155,7 +170,7 @@ def guide_dog() -> list[str]:
         el("path", d="M46 44 q-2 -22 18 -24 q16 0 16 20", fill="none", stroke="#8d93a8", stroke_width=4, stroke_linecap="round"),
         el("rect", x=40, y=44, width=36, height=10, rx=4, fill="#555b70", stroke=INK, stroke_width=2),
         el("rect", x=50, y=44, width=16, height=10, fill="#ffd166"),
-        head(yellow),
+        *head(yellow),
         *snout(light),
         *eye(),
         *collar("#7ee04f"),
@@ -166,14 +181,15 @@ def guide_dog() -> list[str]:
 def service_dog() -> list[str]:
     black, grey = "#3a3c48", "#5a5d6e"
     return [
+        ground_shadow(),
         tail_wag(black),
         *legs(black),
-        body(black),
+        *body(black),
         # red vest with a white band
         el("path", d="M30 52 q26 -22 56 -4 l-2 18 q-26 -10 -52 2z", fill="#e23b3b", stroke=INK, stroke_width=SW,
            stroke_linejoin="round"),
         el("rect", x=48, y=46, width=14, height=20, fill="#ffffff", transform="rotate(-8 55 56)"),
-        head(black),
+        *head(black),
         *snout(grey, nose="#0d0e14"),
         *eye(iris="#6b3f1e"),
         *collar("#ffb42e"),
@@ -184,10 +200,12 @@ def service_dog() -> list[str]:
 def pug() -> list[str]:
     fawn, mask = "#d8b47a", "#2a2630"
     return [
+        ground_shadow(),
         *tail_curl(fawn),
         *legs(fawn),
-        body(fawn, ry=22),
+        *body(fawn, ry=22),
         el("circle", cx=86, cy=44, r=22, fill=fawn, stroke=INK, stroke_width=SW),
+        el("circle", cx=79, cy=36, r=9, fill="#ffffff", fill_opacity=0.16),
         el("circle", cx=96, cy=48, r=13, fill=mask),  # black mask
         el("ellipse", cx=103, cy=50, rx=9, ry=6.5, fill=mask, stroke=INK, stroke_width=2),
         el("circle", cx=110, cy=47, r=3.6, fill="#0d0e14"),
@@ -203,11 +221,12 @@ def pug() -> list[str]:
 def husky() -> list[str]:
     grey, white = "#8e97a8", "#f0f3f8"
     return [
+        ground_shadow(),
         *tail_bushy(grey, white),
         *legs(white),
-        body(grey),
+        *body(grey),
         el("ellipse", cx=62, cy=70, rx=22, ry=10, fill=white),
-        head(grey),
+        *head(grey),
         el("path", d="M80 42 q8 -14 16 0 q8 18 -2 22 q-14 2 -14 -22z", fill=white),  # face mask
         *pointed_ears(grey, "#f5c9c2"),
         *snout(white),

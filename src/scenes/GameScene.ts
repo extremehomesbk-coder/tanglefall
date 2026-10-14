@@ -1,10 +1,13 @@
 import Phaser from 'phaser';
-import { playBonus, playGameOver, playPush, playRopeClear, playTwist, playUntwist, unlockAudio } from '../audio';
+import { playBonus, playClick, playGameOver, playPush, playRopeClear, playTwist, playUntwist, playWalkClear, unlockAudio } from '../audio';
 import { CONFIG } from '../config';
+import { dailySeed, dateKey, streakNow } from '../daily';
+import { buzz } from '../haptics';
 import { applyMove, chooseMove, type BotStyle } from '../model/bot';
 import { computePerms, Game } from '../model/game';
 import type { GameEvent, Knot, Rope } from '../model/types';
-import { getHighScore, setHighScore } from '../storage';
+import { getDaily, getHighScore, getStats, setDaily, setHighScore, updateStats } from '../storage';
+import { addBackdrop, addDangerVignette } from '../view/Backdrop';
 import { BraidView, type BraidSnapshot } from '../view/BraidView';
 import { FrameView } from '../view/FrameView';
 import { Hud } from '../view/Hud';
@@ -13,12 +16,15 @@ import { Layout } from '../view/layout';
 import { HD } from '../hd';
 
 const FONT = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-type OverlayKind = 'stageClear' | 'walkOver' | 'gameOver';
+type OverlayKind = 'stageClear' | 'walkOver' | 'gameOver' | 'paused';
 /** ?demo=: 'fail' plays until it is CONFIG.demo.failStopShort dogs from the target (or failPlayMs), then idles out the clock. */
 type DemoStyle = BotStyle | 'fail';
+export type GameMode = 'run' | 'daily';
 
 export interface GameSceneData {
   twoTap?: boolean;
+  mode?: GameMode;
+  assist?: boolean; // show the green/red rings on every walk (settings); the first walk ever shows them anyway
 }
 
 export class GameScene extends Phaser.Scene {
@@ -34,18 +40,28 @@ export class GameScene extends Phaser.Scene {
   private candleTop!: Phaser.GameObjects.Container;
   private candleBottom!: Phaser.GameObjects.Container;
   private candleBeam!: Phaser.GameObjects.Rectangle;
+  private vignette!: Phaser.GameObjects.Image;
   private overlay: Phaser.GameObjects.Container | null = null;
   private pushTimer = 0;
   private twoTap = false;
+  private mode: GameMode = 'run';
+  private assist = false;
+  private coaching = false; // first walk ever: rings + hints, whatever the setting
+  private coachedTwist = false;
   private best = 0;
   private ropesBefore: Rope[] = [];
   private pendingTransition: Phaser.Time.TimerEvent | null = null;
   private auto = false;
   private demoStyle: DemoStyle = 'play';
   private hookText: string | null = null;
+  private holdOverlay = false; // ?hold=1 (clips): the bot leaves end-of-walk overlays on screen
   private walkStartMs = 0;
   private autoTimer = 0;
   private fpsTimer = 0;
+  private maxChain = 0;
+  private laneBusyUntil: number[] = [0, 0, 0, 0];
+  private seed: number | undefined;
+  private onHidden = (): void => this.pause();
 
   constructor() {
     super('game');
@@ -53,6 +69,8 @@ export class GameScene extends Phaser.Scene {
 
   init(data: GameSceneData): void {
     this.twoTap = data.twoTap ?? CONFIG.rules.twoTapMode;
+    this.mode = data.mode ?? 'run';
+    this.assist = data.assist ?? CONFIG.coach.assistDefault;
   }
 
   preload(): void {
@@ -68,33 +86,65 @@ export class GameScene extends Phaser.Scene {
     this.knotViews.clear();
     this.overlay = null;
     this.pushTimer = 0;
+    this.maxChain = 0;
+    this.coachedTwist = false;
+    this.laneBusyUntil = [0, 0, 0, 0];
     this.best = getHighScore();
 
     const q = new URLSearchParams(window.location.search);
-    const seed = Number(q.get('seed'));
+    const urlSeed = Number(q.get('seed'));
     this.auto = q.has('auto');
     this.demoStyle = this.auto ? ((q.get('demo') as DemoStyle | null) ?? 'play') : 'play';
     this.hookText = this.auto ? q.get('hook') : null;
-    this.model = new Game(CONFIG, Number.isFinite(seed) && seed > 0 ? seed : undefined);
+    this.holdOverlay = this.auto && q.has('hold');
+    if (this.auto && q.get('mode') === 'daily') this.mode = 'daily';
+    if (this.mode === 'daily') this.seed = dailySeed(dateKey(), CONFIG.daily.seedBase);
+    else this.seed = Number.isFinite(urlSeed) && urlSeed > 0 ? urlSeed : undefined;
+    this.coaching = !this.auto && CONFIG.coach.firstWalkAssist && !getStats().coached;
+    this.model = new Game(CONFIG, this.seed);
     const walk = (q.get('walk') ?? '1-1').split('-').map(Number);
-    this.model.startStage(this.auto && walk[0] > 0 ? walk[0] : 1, this.auto && walk[1] > 0 ? walk[1] : 1);
+    if (this.mode === 'daily') this.model.startStage(CONFIG.daily.level, CONFIG.daily.stage);
+    else this.model.startStage(this.auto && walk[0] > 0 ? walk[0] : 1, this.auto && walk[1] > 0 ? walk[1] : 1);
     const walkSec = Number(q.get('walksec'));
     if (this.auto && walkSec > 0) this.model.walkMsLeft = walkSec * 1000;
     this.walkStartMs = this.model.walkMsLeft;
     this.model.drain();
+    this.noteWalkStart();
     this.layout = new Layout();
     this.layout.setRopeCount(this.model.ropes.length);
     this.cameras.main.setZoom(HD).centerOn(CONFIG.layout.width / 2, CONFIG.layout.height / 2);
 
+    addBackdrop(this);
     this.drawBoard();
     this.braid = new BraidView(this, this.layout, this.snapshot()).setDepth(10);
     this.hud = new Hud(this);
     this.hud.setBest(this.best);
     this.frame = new FrameView(this, this.layout.spacing, this.layout.rowH).setDepth(20);
+    this.vignette = addDangerVignette(this);
     this.buildCandleMarkers();
     this.buildStageViews();
     this.bindInput();
+    this.game.events.on(Phaser.Core.Events.HIDDEN, this.onHidden);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.game.events.off(Phaser.Core.Events.HIDDEN, this.onHidden));
     this.getReady();
+  }
+
+  private noteWalkStart(): void {
+    if (this.auto) return;
+    updateStats((s) => {
+      s.walksPlayed += 1;
+    });
+    if (this.mode === 'daily') {
+      const today = dateKey();
+      const d = getDaily();
+      if (d.date !== today) {
+        const carry = streakNow(d.date, d.streak, d.cleared, today);
+        setDaily({ v: 1, date: today, best: 0, cleared: false, attempts: 1, streak: carry });
+      } else {
+        d.attempts += 1;
+        setDaily(d);
+      }
+    }
   }
 
   private getReady(): void {
@@ -106,7 +156,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (CONFIG.rules.walkMode) {
       const sub = this.add
-        .text(L.width / 2, L.boardTop + L.boardHeight * 0.4 + 34, `get ${this.model.walkTarget} dogs home`, {
+        .text(L.width / 2, L.boardTop + L.boardHeight * 0.4 + 34, this.mode === 'daily' ? `today's walk: ${this.model.walkTarget} dogs home` : `get ${this.model.walkTarget} dogs home`, {
           fontFamily: FONT,
           fontSize: '18px',
           color: CONFIG.colors.text,
@@ -131,6 +181,23 @@ export class GameScene extends Phaser.Scene {
       .setScale(0.5);
     this.tweens.add({ targets: t, scale: 1.1, duration: 250, ease: 'Back.easeOut' });
     this.tweens.add({ targets: t, alpha: 0, y: t.y - 30, delay: 650, duration: 300, onComplete: () => t.destroy() });
+    if (this.coaching) this.time.delayedCall(1000, () => this.coachLine('Tap a knot with a GREEN ring'));
+  }
+
+  /** Coach line for the first walk: a pill under the HUD that fades after CONFIG.coach.hintMs. */
+  private coachLine(text: string): void {
+    const L = this.layout;
+    const y = L.boardTop + 26;
+    const bg = this.add.rectangle(L.width / 2, y, L.width - 48, 36, 0x000000, 0.7).setDepth(89);
+    bg.setStrokeStyle(1.5, 0x9dffb0, 0.8);
+    const t = this.add
+      .text(L.width / 2, y, text, { fontFamily: FONT, fontSize: '15px', color: '#dfffe6', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(90);
+    const made = [bg, t];
+    for (const o of made) o.setAlpha(0);
+    this.tweens.add({ targets: made, alpha: 1, duration: 200 });
+    this.tweens.add({ targets: made, alpha: 0, delay: CONFIG.coach.hintMs, duration: 300, onComplete: () => made.forEach((o) => o.destroy()) });
   }
 
   /** Clip hook (?hook=line|line2): big centred text over the board while the bot waits, then the walk starts. */
@@ -169,15 +236,21 @@ export class GameScene extends Phaser.Scene {
   private drawBoard(): void {
     const L = this.layout;
     const g = this.add.graphics().setDepth(0);
-    g.fillStyle(CONFIG.colors.board, 1);
+    // translucent panel so the leashes read against the sky
+    g.fillStyle(CONFIG.colors.panel, 0.55);
     g.fillRoundedRect(8, L.boardTop - 4, L.width - 16, L.boardHeight + 8, 16);
-    g.lineStyle(2, CONFIG.colors.boardEdge, 1);
+    g.lineStyle(1.5, CONFIG.colors.boardEdge, 0.8);
     g.strokeRoundedRect(8, L.boardTop - 4, L.width - 16, L.boardHeight + 8, 16);
-    g.fillStyle(CONFIG.colors.danger, 0.06);
-    g.fillRect(10, L.dangerY(), L.width - 20, L.boardBottom - L.dangerY());
+    // danger zone: a red wash that deepens towards the floor
+    const steps = 6;
+    const h = (L.boardBottom - L.dangerY()) / steps;
+    for (let i = 0; i < steps; i++) {
+      g.fillStyle(CONFIG.colors.danger, 0.03 + i * 0.022);
+      g.fillRect(10, L.dangerY() + i * h, L.width - 20, h + 0.5);
+    }
     g.lineStyle(1, CONFIG.colors.danger, 0.35);
     for (let x = 14; x < L.width - 14; x += 12) g.lineBetween(x, L.dangerY(), x + 6, L.dangerY());
-    g.lineStyle(3, CONFIG.colors.danger, 0.5);
+    g.lineStyle(3, CONFIG.colors.danger, 0.55);
     g.lineBetween(12, L.boardBottom + 2, L.width - 12, L.boardBottom + 2);
 
     this.pushBar = this.add.graphics().setDepth(30);
@@ -261,7 +334,7 @@ export class GameScene extends Phaser.Scene {
     this.frame.resize(this.layout.spacing, this.layout.rowH);
     for (const rope of m.ropes) this.makeDog(rope);
     for (const knot of m.knots) this.makeKnotView(knot, false);
-    this.hud.setLevel(m.level, m.stage);
+    this.hud.setLevel(m.level, m.stage, this.mode === 'daily');
     this.hud.setScore(m.score);
     this.hud.setBonuses(m.bonuses);
     this.hud.setChain(m.chain);
@@ -316,9 +389,13 @@ export class GameScene extends Phaser.Scene {
     else this.frame.setPosition(x, y);
   }
 
+  private get showRings(): boolean {
+    return this.assist || this.coaching || CONFIG.rules.previewMode !== 'off';
+  }
+
   private refreshPreview(): void {
     const m = this.model;
-    if (CONFIG.rules.previewMode === 'off') {
+    if (!this.showRings) {
       for (const v of this.knotViews.values()) v.setPreview('none');
       return;
     }
@@ -359,11 +436,22 @@ export class GameScene extends Phaser.Scene {
     kb.on('keydown-ENTER', () => this.overlay && this.dismissOverlay());
     kb.on('keydown-F', () => this.run(() => this.model.flipWithBonus()));
     kb.on('keydown-C', () => this.run(() => this.model.candleConnect()));
+    kb.on('keydown-P', () => this.togglePause());
+    kb.on('keydown-ESC', () => this.togglePause());
   }
 
   private onTap(x: number, y: number): void {
     unlockAudio();
     if (this.overlay) {
+      const kind = this.overlay.getData('kind') as OverlayKind;
+      if (kind === 'paused') {
+        const quit = this.overlay.getData('quit') as Phaser.Geom.Rectangle | undefined;
+        if (quit?.contains(x, y)) {
+          playClick();
+          this.scene.start('menu');
+          return;
+        }
+      }
       this.dismissOverlay();
       return;
     }
@@ -375,6 +463,10 @@ export class GameScene extends Phaser.Scene {
           if (!this.model.flipWithBonus()) this.shake(this.frame);
           else this.hud.flashFlip();
         });
+        return;
+      }
+      if (this.hud.hitPause(x, y)) {
+        this.togglePause();
         return;
       }
       if (m.candle && Math.abs(x - this.candleBottom.x) < 40 && Math.abs(y - this.candleBottom.y) < 40) {
@@ -397,10 +489,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   private run(cmd: () => void): void {
-    if (this.model.status !== 'playing') return;
+    if (this.model.status !== 'playing' || this.overlay) return;
     this.ropesBefore = this.model.ropes.slice();
     cmd();
     this.handle(this.model.drain());
+  }
+
+  // ---------- pause ----------
+
+  private togglePause(): void {
+    if (this.overlay) {
+      if ((this.overlay.getData('kind') as OverlayKind) === 'paused') this.dismissOverlay();
+      return;
+    }
+    this.pause();
+  }
+
+  private pause(): void {
+    if (this.auto || this.overlay || this.model.status !== 'playing') return;
+    playClick();
+    this.showOverlay('paused', 0);
   }
 
   // ---------- event playback ----------
@@ -449,8 +557,10 @@ export class GameScene extends Phaser.Scene {
         if (v) this.animateUntwist(v, e.knot, e.points, e.chain);
         this.knotViews.delete(e.knot.id);
         playUntwist(e.chain);
+        buzz(CONFIG.haptics.untwist);
+        this.maxChain = Math.max(this.maxChain, e.chain);
         const callout = CONFIG.anim.chainCallouts[e.chain];
-        if (callout) this.floatText(this.layout.centerX, this.layout.boardTop + this.layout.boardHeight * 0.3, callout, '#ffd166', 30);
+        if (callout) this.callout(callout, '#ffd166', 30);
         break;
       }
       case 'chain':
@@ -467,8 +577,13 @@ export class GameScene extends Phaser.Scene {
         this.floatText(this.layout.gapX(m.gapOf(e.knot), n), this.layout.rowY(e.knot.row) - 20, 'TIGHTER!', '#ff6b6b');
         this.cameras.main.shake(90, 0.004);
         playTwist();
+        buzz(CONFIG.haptics.twist);
         this.pushTimer = Math.min(m.pushIntervalMs - 60, this.pushTimer + m.pushIntervalMs * CONFIG.rules.twistPushPenalty);
         this.tweens.add({ targets: this.pushStamp, alpha: { from: 1, to: 0 }, duration: 250 });
+        if (this.coaching && !this.coachedTwist) {
+          this.coachedTwist = true;
+          this.coachLine('RED ring = wrong frame. Every tap flips it.');
+        }
         break;
       }
       case 'noKnot':
@@ -478,21 +593,7 @@ export class GameScene extends Phaser.Scene {
         const dog = this.dogViews.get(e.rope.id);
         if (dog) {
           this.dogViews.delete(e.rope.id);
-          this.tweens.killTweensOf(dog);
-          const dir = dog.x < this.layout.centerX ? -1 : 1;
-          const s = (dog.getData('s') as number) ?? 1;
-          dog.setFlipX(dir < 0); // the sprite faces right
-          this.tweens.add({ targets: dog, scale: s * 1.4, duration: 160, yoyo: true });
-          this.tweens.add({
-            targets: dog,
-            x: dog.x + dir * 260,
-            y: dog.y - 20,
-            angle: dir * 25,
-            delay: CONFIG.anim.untwistMs,
-            duration: 600,
-            ease: 'Quad.easeIn',
-            onComplete: () => dog.destroy(),
-          });
+          this.runOff(dog);
         }
         for (const k of e.knots) {
           const kv = this.knotViews.get(k.id);
@@ -501,25 +602,24 @@ export class GameScene extends Phaser.Scene {
         }
         this.time.delayedCall(CONFIG.anim.untwistMs, () => this.ropeFlash(e.rope));
         playRopeClear();
+        buzz(CONFIG.haptics.home);
         if (e.cause === 'untwist' && CONFIG.rules.ropeClearResetsPush) this.pushTimer = 0;
         this.hud.setHome(e.dogsFreed, e.walkTarget);
-        this.floatText(
-          this.layout.centerX,
-          this.layout.boardTop + 60,
-          e.cause === 'candle'
-            ? `BURNED +${CONFIG.scoring.candleRope}`
-            : `${m.breedOf(e.rope).name.toUpperCase()} HOME! +${CONFIG.scoring.ropeRemoved}`,
+        this.callout(
+          e.cause === 'candle' ? `BURNED +${CONFIG.scoring.candleRope}` : `${m.breedOf(e.rope).name.toUpperCase()} HOME! +${CONFIG.scoring.ropeRemoved}`,
           '#ffd166',
           22,
         );
         break;
       }
       case 'walkBonus':
-        this.floatText(this.layout.centerX, this.layout.boardTop + 90, `+${Math.round(e.ms / 1000)} s`, '#9dffb0', 20);
+        this.callout(`+${Math.round(e.ms / 1000)} s`, '#9dffb0', 20);
         break;
       case 'walkOver':
         if (m.score > getHighScore()) setHighScore(m.score);
+        this.noteWalkEnd(false);
         playGameOver();
+        buzz(CONFIG.haptics.over);
         this.time.delayedCall(500, () => this.showOverlay('walkOver', 0));
         break;
       case 'frameMoved':
@@ -551,16 +651,49 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'stageClear':
         if (m.score > getHighScore()) setHighScore(m.score);
-        this.time.delayedCall(900, () => this.showOverlay('stageClear', e.bonusPoints));
+        this.noteWalkEnd(true);
+        playWalkClear();
+        buzz(CONFIG.haptics.walkDone);
+        this.cameras.main.flash(160, 140, 255, 170);
+        this.time.delayedCall(250, () => this.callout(this.mode === 'daily' ? 'DAILY DONE!' : 'ALL HOME!', '#9dffb0', 38));
+        this.time.delayedCall(1100, () => this.showOverlay('stageClear', e.bonusPoints));
         break;
       case 'gameOver':
         if (m.score > getHighScore()) setHighScore(m.score);
+        this.noteWalkEnd(false);
         playGameOver();
+        buzz(CONFIG.haptics.over);
         this.cameras.main.shake(350, 0.012);
         this.time.delayedCall(700, () => this.showOverlay('gameOver', 0));
         break;
       default:
         break;
+    }
+  }
+
+  /** Local stats + daily record at the end of a walk (nothing leaves the phone). */
+  private noteWalkEnd(cleared: boolean): void {
+    if (this.auto) return;
+    const m = this.model;
+    updateStats((s) => {
+      if (cleared) s.walksCleared += 1;
+      s.dogsHome += m.dogsFreed;
+      s.bestChain = Math.max(s.bestChain, this.maxChain);
+      if (this.mode === 'run' && (m.level > s.bestLevel || (m.level === s.bestLevel && m.stage > s.bestStage))) {
+        s.bestLevel = m.level;
+        s.bestStage = m.stage;
+      }
+      s.coached = true;
+    });
+    if (this.mode === 'daily') {
+      const d = getDaily();
+      if (d.date !== dateKey()) return;
+      if (cleared) {
+        if (!d.cleared) d.streak += 1;
+        d.cleared = true;
+        d.best = Math.max(d.best, m.score);
+      }
+      setDaily(d);
     }
   }
 
@@ -574,7 +707,10 @@ export class GameScene extends Phaser.Scene {
     for (const id of [knot.left, knot.right]) {
       const dog = this.dogViews.get(id);
       const s = (dog?.getData('s') as number) ?? 1;
-      if (dog) this.tweens.add({ targets: dog, scale: { from: s * 1.3, to: s }, duration: 220, ease: 'Back.easeOut' });
+      if (dog) {
+        this.tweens.add({ targets: dog, scale: { from: s * 1.25, to: s }, duration: 220, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: dog, y: dog.y - 7, duration: 110, yoyo: true, ease: 'Quad.easeOut' });
+      }
     }
     this.floatText(v.x, v.y - 16, chain > 1 ? `+${points}  x${chain}` : `+${points}`, '#9dffb0', 14 + Math.min(chain, 8) * 2);
   }
@@ -583,6 +719,55 @@ export class GameScene extends Phaser.Scene {
     const flash = this.add.circle(v.x, v.y, this.layout.spacing * 0.6, 0xff3b3b, 0.55).setDepth(16).setBlendMode(Phaser.BlendModes.ADD);
     this.tweens.add({ targets: flash, scale: 1.6, alpha: 0, duration: 260, onComplete: () => flash.destroy() });
     this.tweens.add({ targets: v, scale: 1.35, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
+  }
+
+  /** A freed dog: a happy hop, confetti, then it runs off the nearer edge with a little squash and dust. */
+  private runOff(dog: Phaser.GameObjects.Image): void {
+    this.tweens.killTweensOf(dog);
+    const dir = dog.x < this.layout.centerX ? -1 : 1;
+    const s = (dog.getData('s') as number) ?? 1;
+    dog.setFlipX(dir < 0); // the sprite faces right
+    dog.setDepth(12);
+    this.tweens.add({ targets: dog, y: dog.y - 16, duration: 150, yoyo: true, ease: 'Quad.easeOut' });
+    this.tweens.add({ targets: dog, scale: s * 1.25, duration: 150, yoyo: true });
+    this.confetti(dog.x, dog.y - 10);
+    const ms = CONFIG.anim.runOffMs;
+    this.tweens.add({
+      targets: dog,
+      x: dog.x + dir * (this.layout.width * 0.8),
+      delay: CONFIG.anim.untwistMs,
+      duration: ms,
+      ease: 'Quad.easeIn',
+      onComplete: () => dog.destroy(),
+    });
+    this.tweens.add({ targets: dog, scaleY: s * 0.88, scaleX: s * 1.08, delay: CONFIG.anim.untwistMs, duration: 70, yoyo: true, repeat: Math.floor(ms / 140) });
+    for (let i = 0; i < 4; i++) {
+      this.time.delayedCall(CONFIG.anim.untwistMs + i * 110, () => {
+        const puff = this.add.circle(dog.x - dir * 14, this.layout.boardBottom + 30, 4 + i, 0xd7dbe8, 0.35).setDepth(11);
+        this.tweens.add({ targets: puff, scale: 2.2, alpha: 0, x: puff.x - dir * 18, y: puff.y - 8, duration: 380, onComplete: () => puff.destroy() });
+      });
+    }
+  }
+
+  private confetti(x: number, y: number): void {
+    const colors = CONFIG.colors.confetti;
+    for (let i = 0; i < CONFIG.anim.confettiCount; i++) {
+      const c = colors[i % colors.length];
+      const p = this.add.rectangle(x, y, 7, 4, c, 1).setDepth(19).setAngle(Phaser.Math.Between(0, 180));
+      const tx = x + Phaser.Math.Between(-90, 90);
+      const up = Phaser.Math.Between(60, 170);
+      this.tweens.add({
+        targets: p,
+        x: tx,
+        y: y - up,
+        angle: p.angle + Phaser.Math.Between(-240, 240),
+        duration: 280,
+        ease: 'Quad.easeOut',
+        onComplete: () => {
+          this.tweens.add({ targets: p, y: y + 30, alpha: 0, angle: p.angle + 180, duration: 460 + Phaser.Math.Between(0, 200), ease: 'Quad.easeIn', onComplete: () => p.destroy() });
+        },
+      });
+    }
   }
 
   private ropeFlash(rope: Rope): void {
@@ -641,6 +826,22 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: t, y: y - 44, alpha: 0, duration: 700, ease: 'Quad.easeOut', onComplete: () => t.destroy() });
   }
 
+  /** Centre callout: picks a free lane over the board so simultaneous texts never pile on each other. */
+  private callout(text: string, color: string, size: number): void {
+    const now = this.time.now;
+    let lane = this.laneBusyUntil.findIndex((t) => t <= now);
+    if (lane < 0) lane = this.laneBusyUntil.indexOf(Math.min(...this.laneBusyUntil));
+    this.laneBusyUntil[lane] = now + CONFIG.anim.floatLaneMs;
+    const y = this.layout.boardTop + this.layout.boardHeight * (0.22 + lane * 0.08);
+    const t = this.add
+      .text(this.layout.centerX, y, text, { fontFamily: FONT, fontSize: `${size}px`, color, fontStyle: 'bold', stroke: '#000', strokeThickness: 5 })
+      .setOrigin(0.5)
+      .setDepth(61)
+      .setScale(0.6);
+    this.tweens.add({ targets: t, scale: 1, duration: 160, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, y: y - 30, alpha: 0, delay: 380, duration: 420, ease: 'Quad.easeIn', onComplete: () => t.destroy() });
+  }
+
   private shake(target: Phaser.GameObjects.Components.Transform): void {
     const x0 = target.x;
     this.tweens.add({ targets: target, x: x0 + 6, duration: 40, yoyo: true, repeat: 2, onComplete: () => target.setX(x0) });
@@ -671,30 +872,55 @@ export class GameScene extends Phaser.Scene {
     const m = this.model;
     const c = this.add.container(0, 0).setDepth(100);
     const bg = this.add.rectangle(L.width / 2, L.height / 2, L.width, L.height, 0x000000, 0.72);
-    const home = `${m.dogsFreed}/${m.walkTarget} home`;
-    const title =
-      kind === 'stageClear' ? `WALK ${m.level}-${m.stage} DONE` : kind === 'walkOver' ? "TIME'S UP" : 'TANGLED!';
+    const card = this.add.rectangle(L.width / 2, L.height / 2 + 6, L.width - 40, kind === 'paused' ? 300 : 250, CONFIG.colors.panel, 0.92);
+    card.setStrokeStyle(1.5, CONFIG.colors.boardEdge, 1);
+    const home = `${Math.min(m.dogsFreed, m.walkTarget)}/${m.walkTarget} home`; // a cascade can free one past the target
+    const daily = this.mode === 'daily';
+    let title: string;
+    let line2: string;
+    let action: string;
+    switch (kind) {
+      case 'stageClear':
+        title = daily ? 'DAILY WALK DONE' : `WALK ${m.level}-${m.stage} DONE`;
+        line2 = `${home}   +${bonusPoints} bonus\nbest chain x${Math.max(1, this.maxChain)}   score ${m.score}`;
+        if (daily) {
+          const d = getDaily();
+          line2 += `\nstreak ${d.streak} day${d.streak === 1 ? '' : 's'}   today's best ${d.best}`;
+        }
+        action = daily ? 'TAP FOR THE MENU' : 'TAP FOR THE NEXT WALK';
+        break;
+      case 'walkOver':
+      case 'gameOver':
+        title = kind === 'walkOver' ? "TIME'S UP" : 'TANGLED!';
+        line2 = `${home}   score ${m.score}\nbest ${Math.max(this.best, m.score)}   best chain x${Math.max(1, this.maxChain)}`;
+        action = CONFIG.rules.walkMode && CONFIG.rules.retrySameWalk ? 'TAP TO WALK AGAIN' : 'TAP TO PLAY AGAIN';
+        break;
+      default:
+        title = 'PAUSED';
+        line2 = `walk ${m.level}-${m.stage}   ${home}   score ${m.score}`;
+        action = 'TAP TO RESUME';
+        break;
+    }
     const t1 = this.add
-      .text(L.width / 2, L.height / 2 - 70, title, { fontFamily: FONT, fontSize: '30px', color: CONFIG.colors.text, fontStyle: 'bold' })
+      .text(L.width / 2, L.height / 2 - 90, title, { fontFamily: FONT, fontSize: '30px', color: CONFIG.colors.text, fontStyle: 'bold' })
       .setOrigin(0.5);
-    const line2 =
-      kind === 'stageClear'
-        ? `${home}   +${bonusPoints} bonus`
-        : `${home}   Score ${m.score}   Best ${Math.max(this.best, m.score)}`;
     const t2 = this.add
-      .text(L.width / 2, L.height / 2 - 20, line2, { fontFamily: FONT, fontSize: '18px', color: CONFIG.colors.textDim })
+      .text(L.width / 2, L.height / 2 - 30, line2, { fontFamily: FONT, fontSize: '16px', color: CONFIG.colors.textDim, align: 'center', lineSpacing: 6 })
       .setOrigin(0.5);
-    const retry = CONFIG.rules.walkMode && CONFIG.rules.retrySameWalk ? 'TAP TO WALK AGAIN' : 'TAP TO PLAY AGAIN';
     const t3 = this.add
-      .text(L.width / 2, L.height / 2 + 40, kind === 'stageClear' ? 'TAP FOR THE NEXT WALK' : retry, {
-        fontFamily: FONT,
-        fontSize: '20px',
-        color: CONFIG.colors.text,
-        fontStyle: 'bold',
-      })
+      .text(L.width / 2, L.height / 2 + 50, action, { fontFamily: FONT, fontSize: '20px', color: CONFIG.colors.text, fontStyle: 'bold' })
       .setOrigin(0.5);
     this.tweens.add({ targets: t3, alpha: { from: 1, to: 0.3 }, duration: 600, yoyo: true, repeat: -1 });
-    c.add([bg, t1, t2, t3]);
+    c.add([bg, card, t1, t2, t3]);
+    if (kind === 'paused') {
+      const r = new Phaser.Geom.Rectangle(L.width / 2 - 80, L.height / 2 + 86, 160, 40);
+      const qb = this.add.rectangle(r.centerX, r.centerY, r.width, r.height, 0x23263a, 1).setStrokeStyle(2, 0x343850, 1);
+      const qt = this.add.text(r.centerX, r.centerY, 'QUIT TO MENU', { fontFamily: FONT, fontSize: '14px', color: CONFIG.colors.textDim, fontStyle: 'bold' }).setOrigin(0.5);
+      c.add([qb, qt]);
+      c.setData('quit', r);
+    }
+    c.setAlpha(0);
+    this.tweens.add({ targets: c, alpha: 1, duration: 180 });
     c.setData('kind', kind);
     this.overlay = c;
   }
@@ -704,16 +930,31 @@ export class GameScene extends Phaser.Scene {
     const kind = this.overlay.getData('kind') as OverlayKind;
     this.overlay.destroy();
     this.overlay = null;
+    if (kind === 'paused') return;
     if (kind === 'stageClear') {
+      if (this.mode === 'daily') {
+        this.scene.start('menu');
+        return;
+      }
       this.model.nextStage();
     } else if (CONFIG.rules.walkMode && CONFIG.rules.retrySameWalk) {
-      this.model.retryWalk();
+      if (this.mode === 'daily') {
+        // the same board again: rebuild from the day's seed
+        this.model = new Game(CONFIG, this.seed);
+        this.model.startStage(CONFIG.daily.level, CONFIG.daily.stage);
+      } else {
+        this.model.retryWalk();
+      }
     } else {
-      this.scene.restart({ twoTap: this.twoTap });
+      this.scene.restart({ twoTap: this.twoTap, mode: this.mode, assist: this.assist });
       return;
     }
     this.model.drain();
+    this.walkStartMs = this.model.walkMsLeft;
+    this.coaching = false;
+    this.maxChain = 0;
     this.pushTimer = 0;
+    this.noteWalkStart();
     this.layout.setRopeCount(this.model.ropes.length);
     this.braid.setTarget(this.snapshot());
     this.braid.t = 1;
@@ -727,7 +968,7 @@ export class GameScene extends Phaser.Scene {
   private autoStep(): void {
     const m = this.model;
     if (this.overlay) {
-      if (this.demoStyle === 'fail') return; // leave TIME'S UP on screen for the clip
+      if (this.demoStyle === 'fail' || this.holdOverlay) return; // leave TIME'S UP / WALK DONE on screen for the clip
       this.dismissOverlay();
       return;
     }
@@ -787,6 +1028,7 @@ export class GameScene extends Phaser.Scene {
       if (x !== undefined) dog.setX(x);
     }
     const dangerStart = CONFIG.board.rows - CONFIG.board.dangerRows;
+    let worst = 0;
     for (const v of this.knotViews.values()) {
       const k = v.knot;
       if (k.row < dangerStart) {
@@ -794,10 +1036,12 @@ export class GameScene extends Phaser.Scene {
         continue;
       }
       const depth = (k.row - dangerStart + 1) / CONFIG.board.dangerRows;
+      worst = Math.max(worst, depth);
       const speed = 0.004 + depth * 0.008;
       v.glow.setAlpha(Math.max(0, 0.25 + depth * 0.35 + Math.sin(time * speed) * 0.2));
       v.glow.setScale(1 + Math.sin(time * speed) * 0.15 * depth);
     }
+    this.vignette.setAlpha(worst > 0 && m.status === 'playing' ? worst * 0.5 + Math.sin(time * 0.006) * 0.12 * worst : 0);
     if (m.candle) {
       const aligned = m.candleAligned();
       this.candleBeam.setVisible(aligned);

@@ -83,3 +83,20 @@ export function playBonus(): void {
 export function playGameOver(): void {
   tone(330, 500, 'sawtooth', 0.12, 55);
 }
+
+/** Last seconds of a walk: a short high blip per second. */
+export function playTick(): void {
+  tone(1320, 45, 'square', 0.05);
+}
+
+/** Walk cleared: three rising notes. */
+export function playWalkClear(): void {
+  tone(523, 120, 'triangle', 0.16);
+  window.setTimeout(() => tone(659, 120, 'triangle', 0.16), 110);
+  window.setTimeout(() => tone(784, 260, 'triangle', 0.18, 1046), 220);
+}
+
+/** Pause / menu taps. */
+export function playClick(): void {
+  tone(660, 40, 'sine', 0.08, 520);
+}
