@@ -24,7 +24,7 @@ export type GameEvent =
   | { type: 'ropeRemoved'; rope: Rope; index: number; cause: 'untwist' | 'candle'; knots: Knot[]; dogsFreed: number; walkTarget: number }
   | { type: 'walkOver'; dogsFreed: number; walkTarget: number }
   | { type: 'walkBonus'; ms: number; ropeId: number }
-  | { type: 'frameMoved'; gap: number }
+  | { type: 'frameMoved'; gap: number; steps: number }
   | { type: 'frameFlipped'; frameType: FrameType; spent: boolean }
   | { type: 'push'; spawned: Knot[] }
   | { type: 'bonus'; bonuses: number }

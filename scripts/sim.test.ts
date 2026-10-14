@@ -79,6 +79,8 @@ function playWalk(level: number, stage: number, seed: number, p: Player): Outcom
       tapTimer = 0;
       let move = chooseMove(g, 'play');
       if (move.kind === 'act' && human.chance(p.errorRate)) move = { kind: 'act', gap: human.int(g.gapCount) };
+      // the frame walks one gap per anim.frameStepMs before it acts, so the next tap comes that much later
+      if (move.kind === 'act') tapTimer = -Math.abs(move.gap - g.frameGap) * CFG.anim.frameStepMs;
       applyMove(g, move);
       for (const e of g.drain()) {
         if (e.type === 'untwist') maxChain = Math.max(maxChain, e.chain);

@@ -32,7 +32,7 @@ export interface BreedDef {
 
 export const CONFIG = {
   title: 'Tanglefall',
-  version: '0.6.0',
+  version: '0.7.0',
 
   board: {
     rows: 16, // knot rows from top to bottom; a knot pushed past the last row ends the game
@@ -44,9 +44,10 @@ export const CONFIG = {
   rules: {
     twistMode: 'addKnot' as TwistMode, // ASSUMPTION: 'addKnot' = a twist stacks one extra knot above; 'flipTop' = flips which rope is on top
     twistNewKnotTop: 'same' as TwistNewKnotTop, // ASSUMPTION: the stacked knot copies the acted knot's top rope
-    actOnEmptyGapFlips: false, // ASSUMPTION: acting on a gap with no knot does nothing and does not flip the frame
+    actOnEmptyGapFlips: true, // tapping a gap with no knot flips the frame (v0.7: the cheap way to change parity)
     stagesPerLevel: 3, // ASSUMPTION
     stageSpeedup: 0.9, // push interval multiplier for each stage after the first within a level (sim 2026-10-09)
+    flipPerStep: true, // the frame flips once for every gap it walks across, so the type you arrive with depends on the distance (v0.7)
     twoTapMode: false, // first tap moves the frame, second tap acts (off = one tap does both)
     previewMode: 'off' as PreviewMode, // 'all' outlines every gap's bottom knot green/red; 'off' = read the knots yourself (v0.2 default)
     orientation: 'alternate' as Orientation, // 'alternate': each push layer (and each start row) flips which rope is on top, so stacks chain
@@ -92,12 +93,13 @@ export const CONFIG = {
     { name: 'Husky', sprite: 'husky', tangleWeight: 1, pointsMul: 1, pushFactor: 0.8, freeBonusMs: 0, cascade: false },
   ] as BreedDef[],
 
-  // Curve from scripts/sim.test.ts (2026-10-09): a new player (1.5 s/tap, 20% misreads) clears 1-1 ~78%, a casual
-  // one (1.1 s, 12%) ~95% through level 3 and ~33% at 4-1, a quick one (0.8 s, 5%) ~98% through level 5, 3% at 7-1.
+  // Curve from scripts/sim.test.ts, re-run 2026-10-14 with the walk rule (the frame flips per gap crossed, walking
+  // costs anim.frameStepMs per gap): a new player (1.5 s/tap, 20% misreads) clears 1-1 ~79%, 1-2 ~71%, 2-1 ~33%;
+  // a casual one (1.1 s, 12%) ~91-94% through 2-1; a quick one (0.8 s, 5%) ~95%+ through 3-1.
   levels: [
-    { ropes: 6, colors: 3, pushIntervalMs: 5500, knotsPerGapPerPush: 0.3, initialKnots: 12, walkMs: 45000, dogsToFree: 5 },
-    { ropes: 6, colors: 3, pushIntervalMs: 5000, knotsPerGapPerPush: 0.35, initialKnots: 14, walkMs: 45000, dogsToFree: 5 },
-    { ropes: 7, colors: 4, pushIntervalMs: 4800, knotsPerGapPerPush: 0.35, initialKnots: 16, walkMs: 50000, dogsToFree: 6 },
+    { ropes: 6, colors: 3, pushIntervalMs: 6200, knotsPerGapPerPush: 0.3, initialKnots: 12, walkMs: 50000, dogsToFree: 5 },
+    { ropes: 6, colors: 3, pushIntervalMs: 5700, knotsPerGapPerPush: 0.35, initialKnots: 14, walkMs: 50000, dogsToFree: 5 },
+    { ropes: 7, colors: 4, pushIntervalMs: 5400, knotsPerGapPerPush: 0.35, initialKnots: 16, walkMs: 52000, dogsToFree: 6 },
     { ropes: 7, colors: 4, pushIntervalMs: 4400, knotsPerGapPerPush: 0.4, initialKnots: 18, walkMs: 50000, dogsToFree: 6 },
     { ropes: 8, colors: 5, pushIntervalMs: 4200, knotsPerGapPerPush: 0.4, initialKnots: 20, walkMs: 55000, dogsToFree: 7 },
     { ropes: 8, colors: 5, pushIntervalMs: 3900, knotsPerGapPerPush: 0.45, initialKnots: 22, walkMs: 55000, dogsToFree: 7 },
@@ -161,6 +163,7 @@ export const CONFIG = {
     pushMs: 220,
     slideMs: 260,
     frameMoveMs: 110,
+    frameStepMs: 100, // one-tap mode: the frame walks one gap per this many ms (flipping at each step) before it acts
     chainCallouts: { 4: 'x4 COMBO', 6: 'x6 ON FIRE', 8: 'x8 MAX!' } as Record<number, string>, // big centre text at these chains
     confettiCount: 22, // pieces when a dog gets home
     runOffMs: 650, // a freed dog runs off screen in this long

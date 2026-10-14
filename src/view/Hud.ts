@@ -151,6 +151,7 @@ export class Hud {
     }
     const size = 15;
     const step = 19;
+    freed = Math.min(freed, target); // a guide-dog cascade can free one past the target
     for (let i = 0; i < target; i++) {
       const x = 16 + i * step;
       const y = footerTop + 54;

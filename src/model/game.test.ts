@@ -274,3 +274,63 @@ describe('walks and breeds', () => {
     expect(breeds.size).toBe(Math.min(CONFIG.breeds.length, g.ropes.length));
   });
 });
+
+describe('the walk (v0.7): the frame flips once per gap it crosses', () => {
+  it('an odd distance flips the frame, an even one keeps it', () => {
+    const { g } = setup('right');
+    g.frameType = 'blue';
+    g.moveFrame(3); // one step
+    expect(g.drain().map((e) => e.type)).toEqual(['frameMoved', 'frameFlipped']);
+    expect(g.frameType).toBe('red');
+    g.moveFrame(1); // two steps back
+    expect(g.drain().map((e) => e.type)).toEqual(['frameMoved']);
+    expect(g.frameType).toBe('red');
+    expect(g.arrivalType(2)).toBe('blue');
+    expect(g.arrivalType(3)).toBe('red');
+  });
+
+  it('readyCount and readyAt use the type the frame arrives with', () => {
+    const { g, knot } = setup('right'); // gap 2 needs blue; frame on gap 2, blue
+    expect(g.readyAt(2)).toBe(true);
+    g.moveFrame(1); // now red, one step away from gap 2
+    g.drain();
+    expect(g.frameType).toBe('red');
+    expect(g.readyAt(2)).toBe(true); // walking back flips to blue again
+    g.moveFrame(0); // blue, two steps away: arrives blue
+    g.drain();
+    expect(g.readyAt(2)).toBe(true);
+    knot.top = 'left'; // needs red; from gap 0 (blue) the frame arrives blue
+    expect(g.readyAt(2)).toBe(false);
+    // gaps 0, 2 and 4 hold knots that all need red now; from gap 0 the frame arrives blue at every one of them
+    expect(g.readyCount()).toBe(0);
+    g.frameType = 'red';
+    expect(g.readyCount()).toBe(3);
+  });
+
+  it('walking to a gap and acting untwists when the arrival parity matches', () => {
+    const { g, knot } = setup('right'); // needs blue
+    g.moveFrame(0); // two steps: still blue
+    g.drain();
+    g.moveFrame(2);
+    g.act();
+    const ev = g.drain().map((e) => e.type);
+    expect(ev).toContain('untwist');
+    expect(g.knots.find((k) => k.id === knot.id)).toBeUndefined();
+  });
+
+  it('tapping an empty gap flips the frame without acting', () => {
+    const { g } = setup('right');
+    g.frameType = 'blue';
+    g.moveFrame(1); // gap 1 is empty in setup(); one step flips to red
+    g.drain();
+    g.act();
+    const ev = g.drain().map((e) => e.type);
+    expect(ev).toEqual(['noKnot', 'frameFlipped']);
+    expect(g.frameType).toBe('blue');
+    expect(g.knots.length).toBe(setupKnotCount());
+  });
+});
+
+function setupKnotCount(): number {
+  return setup('right').g.knots.length;
+}

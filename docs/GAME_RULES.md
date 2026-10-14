@@ -4,6 +4,25 @@ Working title. Original mechanics-inspired puzzle; no third-party names, art, so
 Every number below lives in `src/config.ts`. Lines marked **ASSUMPTION** were not confirmed by the
 brief and are the first things to playtest.
 
+## v0.7 (2026-10-14): the walk (the missing decision)
+Owner on v0.6: "It's just clicking." Diagnosis: moving the frame was free and it only flipped on a tap, so after every
+tap the next type was the same at every gap; any ready knot was as good as any other, order never mattered, and the sim
+showed 0-2 wrong taps per walk. The only skill was reading strands.
+- **`rules.flipPerStep = true`**: the frame flips once for every gap it crosses (`Game.moveFrame` emits `steps`; an odd
+  distance flips), and once more when it acts, as before. The type you arrive with = current type XOR distance parity:
+  two lanes away = same colour, next door = the other. `Game.arrivalType(gap)` / `readyAt(gap)`; `readyCount`, the assist
+  rings and the bot all use the arrival type. Desktop arrows step one gap (and flip).
+- **One-tap mode walks**: a tap sets a target; the frame crosses one gap per `anim.frameStepMs` (100 ms), flipping at
+  each, then acts (`GameScene.walkTo`; a tap mid-walk retargets). Two-tap: first tap walks, second acts.
+- **Lane dots** under every lane show the colour the frame would arrive with; the current lane is ringed. The parity
+  rule is visible, the strand reading stays the skill.
+- **`rules.actOnEmptyGapFlips = true`**: tapping a lane with no knot flips the frame ("FLIP"), the cheap parity change.
+  Costly ones: a twist on a neighbour, or a sparkle FLIP.
+- **Retuned** (sim, 150 seeds, the walk time counted at 100 ms per gap): with the old numbers 1-1 fell to 61% for the
+  new player. Level 1: pushes 6.2 s, 50 s walks; level 2: 5.7 s, 50 s; level 3: 5.4 s, 52 s. Now new 79% / 71% / 60% on
+  1-1 / 1-2 / 1-3 and 33% at 2-1; casual 91-94% through 2-1; good 95%+ through 3-1 (v0.5 was 78 / 75 / 55 / 37).
+- Help text and the first-walk coach's second hint explain the walk.
+
 ## v0.6 (2026-10-13): ship pass (graphics + gameplay)
 - **Look**: a dusk park painted once into a canvas texture (`src/view/Backdrop.ts`: sky gradient, stars, moon, two hill
   lines, grass bank, path), a translucent panel behind the leashes, drop shadows under every strand, the over-strand gap
@@ -118,7 +137,7 @@ The first build played as "tap the green ones". v0.2 makes moves scarce and the 
 - Matching frame = **untwist** (knot removed). Wrong frame = **twist**.
 - The HUD shows the current type (NOW) and the next (NEXT); every gap's bottom knot carries a live
   green (will untwist) or red (will twist) outline.
-- **ASSUMPTION** `rules.actOnEmptyGapFlips = false`: acting on a gap with no knot does nothing and does not flip.
+- `rules.actOnEmptyGapFlips = true` (v0.7): acting on a gap with no knot flips the frame without acting.
 
 ## What a twist does (`rules.twistMode`)
 

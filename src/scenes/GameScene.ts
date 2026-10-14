@@ -60,6 +60,10 @@ export class GameScene extends Phaser.Scene {
   private fpsTimer = 0;
   private maxChain = 0;
   private laneBusyUntil: number[] = [0, 0, 0, 0];
+  private laneDots!: Phaser.GameObjects.Graphics;
+  private walkTarget = -1; // one-tap mode: the gap the frame is walking to (-1 = not walking)
+  private walkAct = false;
+  private walker: Phaser.Time.TimerEvent | null = null;
   private seed: number | undefined;
   private onHidden = (): void => this.pause();
 
@@ -120,6 +124,7 @@ export class GameScene extends Phaser.Scene {
     this.hud = new Hud(this);
     this.hud.setBest(this.best);
     this.frame = new FrameView(this, this.layout.spacing, this.layout.rowH).setDepth(20);
+    this.laneDots = this.add.graphics().setDepth(21);
     this.vignette = addDangerVignette(this);
     this.buildCandleMarkers();
     this.buildStageViews();
@@ -345,6 +350,7 @@ export class GameScene extends Phaser.Scene {
     this.frame.redraw(m.frameType);
     this.placeFrame(false);
     this.refreshPreview();
+    this.refreshLanes();
   }
 
   private makeDog(rope: Rope): void {
@@ -405,9 +411,30 @@ export class GameScene extends Phaser.Scene {
       const k = m.bottomKnot(g);
       if (!k) continue;
       bottoms.add(k.id);
-      this.knotViews.get(k.id)?.setPreview(m.wouldUntwist(k, m.frameType, perms) ? 'good' : 'bad');
+      this.knotViews.get(k.id)?.setPreview(m.readyAt(g, perms) ? 'good' : 'bad'); // with the type the frame ARRIVES with
     }
     for (const [id, v] of this.knotViews) if (!bottoms.has(id)) v.setPreview('none');
+  }
+
+  /** One dot per lane in the colour the frame would arrive with (it flips at every gap it crosses); the current lane is ringed. */
+  private refreshLanes(): void {
+    const m = this.model;
+    const n = m.ropes.length;
+    const g = this.laneDots;
+    g.clear();
+    if (!CONFIG.rules.flipPerStep) return;
+    for (let i = 0; i < m.gapCount; i++) {
+      const color = m.arrivalType(i) === 'blue' ? CONFIG.colors.frameBlue : CONFIG.colors.frameRed;
+      const x = this.layout.gapX(i, n);
+      const y = this.layout.boardTop + 5; // just under the push bar, above the first knot row
+      const cur = i === m.frameGap;
+      g.fillStyle(color, cur ? 1 : 0.8);
+      g.fillCircle(x, y, cur ? 6 : 4);
+      if (cur) {
+        g.lineStyle(2, 0xffffff, 0.85);
+        g.strokeCircle(x, y, 6);
+      }
+    }
   }
 
   /** Columns changed (a rope left): slide knot overlays, frame and markers; the braid morphs on its own. */
@@ -478,14 +505,49 @@ export class GameScene extends Phaser.Scene {
     }
     if (y < L.boardTop - 10) return;
     const gap = L.gapFromX(x, m.ropes.length);
-    this.run(() => {
-      if (this.twoTap && this.model.frameGap !== gap) {
-        this.model.moveFrame(gap);
-        return;
-      }
-      this.model.moveFrame(gap);
-      this.model.act();
+    if (this.twoTap && m.frameGap !== gap && this.walkTarget < 0) {
+      this.walkTo(gap, false);
+      return;
+    }
+    this.walkTo(gap, true);
+  }
+
+  // ---------- the walk: the frame crosses one gap per anim.frameStepMs, flipping at each, then acts ----------
+
+  private walkTo(gap: number, act: boolean): void {
+    const m = this.model;
+    this.walkTarget = Math.max(0, Math.min(m.gapCount - 1, gap));
+    this.walkAct = act;
+    if (this.walker) return; // already walking: retargeted
+    this.walkStep();
+  }
+
+  private walkStep(): void {
+    const m = this.model;
+    if (m.status !== 'playing' || this.overlay || m.gapCount === 0) {
+      this.stopWalk();
+      return;
+    }
+    const target = Math.min(this.walkTarget, m.gapCount - 1);
+    if (m.frameGap === target) {
+      const act = this.walkAct;
+      this.stopWalk();
+      if (act) this.run(() => this.model.act());
+      return;
+    }
+    const dir = target > m.frameGap ? 1 : -1;
+    this.run(() => this.model.moveFrame(this.model.frameGap + dir));
+    this.walker = this.time.delayedCall(CONFIG.anim.frameStepMs, () => {
+      this.walker = null;
+      this.walkStep();
     });
+  }
+
+  private stopWalk(): void {
+    this.walker?.remove(false);
+    this.walker = null;
+    this.walkTarget = -1;
+    this.walkAct = false;
   }
 
   private run(cmd: () => void): void {
@@ -539,12 +601,13 @@ export class GameScene extends Phaser.Scene {
     }
     this.hud.setScore(this.model.score);
     this.hud.setChain(this.model.chain);
-    this.hud.setReady(this.model.readyCount(), this.model.bonuses);
+    if (this.model.status === 'playing') this.hud.setReady(this.model.readyCount(), this.model.bonuses);
     if (this.model.score > this.best) {
       this.best = this.model.score;
       this.hud.setBest(this.best);
     }
     this.refreshPreview();
+    this.refreshLanes();
     this.placeFrame(true);
   }
 
@@ -582,12 +645,13 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: this.pushStamp, alpha: { from: 1, to: 0 }, duration: 250 });
         if (this.coaching && !this.coachedTwist) {
           this.coachedTwist = true;
-          this.coachLine('RED ring = wrong frame. Every tap flips it.');
+          this.coachLine('The frame flips at every gap it crosses. Two away = same colour.');
         }
         break;
       }
       case 'noKnot':
-        this.shake(this.frame);
+        if (CONFIG.rules.actOnEmptyGapFlips) this.floatText(this.frame.x, this.frame.y - 24, 'FLIP', '#ffffff');
+        else this.shake(this.frame);
         break;
       case 'ropeRemoved': {
         const dog = this.dogViews.get(e.rope.id);
@@ -930,6 +994,7 @@ export class GameScene extends Phaser.Scene {
     const kind = this.overlay.getData('kind') as OverlayKind;
     this.overlay.destroy();
     this.overlay = null;
+    this.stopWalk();
     if (kind === 'paused') return;
     if (kind === 'stageClear') {
       if (this.mode === 'daily') {

@@ -1,7 +1,7 @@
 # Tanglefall (working title)
 
-Mobile-web puzzle game (v0.6 ship pass 2026-10-13): untwist knots between coloured ropes with a frame that flips type after every
-action. Own repo (`extremehomesbk-coder/tanglefall`), deployed to GitHub Pages by `.github/workflows/deploy.yml`
+Mobile-web puzzle game (v0.7, 2026-10-14): untwist knots between coloured ropes with a frame that flips type at every gap it
+walks across and after every action. Own repo (`extremehomesbk-coder/tanglefall`), deployed to GitHub Pages by `.github/workflows/deploy.yml`
 on every push to `main`. Not an EHM or Halsey project: no EHM data, skills or doc routing apply here.
 
 ## Hard rules

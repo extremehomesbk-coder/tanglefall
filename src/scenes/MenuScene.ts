@@ -318,16 +318,16 @@ export class MenuScene extends Phaser.Scene {
     const title = this.add.text(width / 2, height / 2 - 250, 'HOW TO PLAY', { fontFamily: FONT, fontSize: '24px', color: CONFIG.colors.text, fontStyle: 'bold', letterSpacing: 2 }).setOrigin(0.5);
     const lines = [
       'Six dogs, six leashes, one tangle. Get the target number of dogs home before the clock runs out.',
-      'Tap between two leashes to work the lowest knot there. The frame flips after every tap.',
-      'BLUE undoes a knot whose RIGHT leash is on top; RED undoes one whose LEFT leash is on top. The leash with the bright edge is on top. Wrong type = a tighter knot and the bar jumps.',
+      'Tap between two leashes: the frame walks there and works the lowest knot. It flips colour at every gap it crosses and once more when it acts, so two lanes away = same colour, next door = the other. The dots under the lanes show what you would arrive with.',
+      'BLUE undoes a knot whose RIGHT leash is on top; RED undoes one whose LEFT leash is on top (bright edge = on top). Wrong colour = a tighter knot and the bar jumps. An empty lane just flips the frame.',
       'Fast untwists chain for x2 to x8. A leash with no knots left sends its dog home and resets the bar.',
       'A knot pushed to the floor, or the clock at zero, ends the walk.',
       'Sparkle knots bank a free FLIP. A candle burns a leash once its red dots line up. A brush recolours.',
     ];
     const body = this.add
-      .text(width / 2, height / 2 - 224, lines.map((l) => `•  ${l}`).join('\n\n'), {
+      .text(width / 2, height / 2 - 232, lines.map((l) => `•  ${l}`).join('\n\n'), {
         fontFamily: FONT,
-        fontSize: '13px',
+        fontSize: '12px',
         color: '#d7dbe8',
         lineSpacing: 2,
         wordWrap: { width: width - 76 },
@@ -335,7 +335,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
     // drawn example: a knot with the right leash on top (= BLUE untwists it)
     const ex = this.add.graphics();
-    const ey = height / 2 + 172;
+    const ey = height / 2 + 184;
     const ex0 = width / 2 - 60;
     const draw = (x0: number, topRight: boolean, type: 'blue' | 'red'): void => {
       const a = CONFIG.colors.palette[0];

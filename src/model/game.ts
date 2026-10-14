@@ -172,14 +172,23 @@ export class Game {
     return [this.ropes[row[c]], this.ropes[row[c + 1]]];
   }
 
-  /** How many gaps' bottom knots the current frame would untwist. 0 = stuck: twist, or spend a bonus. */
+  /** The type the frame has once it reaches `gap`: with `rules.flipPerStep` it flips on every gap crossed. */
+  arrivalType(gap: number, from = this.frameGap, type = this.frameType): FrameType {
+    const steps = Math.abs(gap - from);
+    return this.cfg.rules.flipPerStep && steps % 2 === 1 ? (type === 'blue' ? 'red' : 'blue') : type;
+  }
+
+  /** Would walking to `gap` and acting untwist its bottom knot? */
+  readyAt(gap: number, perms?: number[][]): boolean {
+    const k = this.bottomKnot(gap);
+    return !!k && this.wouldUntwist(k, this.arrivalType(gap), perms);
+  }
+
+  /** How many gaps the frame could walk to and untwist right now. 0 = stuck: twist, spend a bonus, or tap an empty gap. */
   readyCount(): number {
     let n = 0;
     const perms = this.perms();
-    for (let g = 0; g < this.gapCount; g++) {
-      const k = this.bottomKnot(g);
-      if (k && this.wouldUntwist(k, this.frameType, perms)) n++;
-    }
+    for (let g = 0; g < this.gapCount; g++) if (this.readyAt(g, perms)) n++;
     return n;
   }
 
@@ -249,12 +258,15 @@ export class Game {
 
   // ---------- player commands ----------
 
+  /** Walk the frame to a gap. With `rules.flipPerStep` it flips once per gap crossed (an odd distance flips it). */
   moveFrame(gap: number): void {
     if (this.status !== 'playing' || this.gapCount === 0) return;
     const g = Math.max(0, Math.min(this.gapCount - 1, gap));
     if (g === this.frameGap) return;
+    const steps = Math.abs(g - this.frameGap);
     this.frameGap = g;
-    this.emit({ type: 'frameMoved', gap: g });
+    this.emit({ type: 'frameMoved', gap: g, steps });
+    if (this.cfg.rules.flipPerStep && steps % 2 === 1) this.flip(false);
   }
 
   act(): void {
@@ -495,7 +507,7 @@ export class Game {
     const g = Math.max(0, Math.min(this.gapCount - 1, this.frameGap));
     if (g !== this.frameGap) {
       this.frameGap = g;
-      this.emit({ type: 'frameMoved', gap: g });
+      this.emit({ type: 'frameMoved', gap: g, steps: 0 }); // a lane closed under the frame: slide, no flip
     }
   }
 
