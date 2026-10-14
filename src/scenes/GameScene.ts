@@ -66,6 +66,7 @@ export class GameScene extends Phaser.Scene {
   private walker: Phaser.Time.TimerEvent | null = null;
   private seed: number | undefined;
   private onHidden = (): void => this.pause();
+  private coachPill: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super('game');
@@ -191,15 +192,18 @@ export class GameScene extends Phaser.Scene {
 
   /** Coach line for the first walk: a pill under the HUD that fades after CONFIG.coach.hintMs. */
   private coachLine(text: string): void {
+    for (const o of this.coachPill) o.destroy(); // one pill at a time
+    this.coachPill = [];
     const L = this.layout;
     const y = L.boardTop + 26;
     const bg = this.add.rectangle(L.width / 2, y, L.width - 48, 36, 0x000000, 0.7).setDepth(89);
     bg.setStrokeStyle(1.5, 0x9dffb0, 0.8);
     const t = this.add
-      .text(L.width / 2, y, text, { fontFamily: FONT, fontSize: '15px', color: '#dfffe6', fontStyle: 'bold' })
+      .text(L.width / 2, y, text, { fontFamily: FONT, fontSize: '14px', color: '#dfffe6', fontStyle: 'bold', wordWrap: { width: L.width - 64 }, align: 'center' })
       .setOrigin(0.5)
       .setDepth(90);
     const made = [bg, t];
+    this.coachPill = made;
     for (const o of made) o.setAlpha(0);
     this.tweens.add({ targets: made, alpha: 1, duration: 200 });
     this.tweens.add({ targets: made, alpha: 0, delay: CONFIG.coach.hintMs, duration: 300, onComplete: () => made.forEach((o) => o.destroy()) });
@@ -645,7 +649,7 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: this.pushStamp, alpha: { from: 1, to: 0 }, duration: 250 });
         if (this.coaching && !this.coachedTwist) {
           this.coachedTwist = true;
-          this.coachLine('The frame flips at every gap it crosses. Two away = same colour.');
+          this.coachLine('Flips at every gap it crosses: two away = same colour');
         }
         break;
       }
